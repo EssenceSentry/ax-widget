@@ -15,9 +15,13 @@ public struct SmallUsageWidget: View {
             attention: snapshot.conversations.contains {
               $0.provider == .codex && $0.needsAttention
             })
-          Text(percent(snapshot.codex)).foregroundStyle(palette.foreground)
-            .help(reset(snapshot.codex))
-            .accessibilityLabel("Codex: \(percent(snapshot.codex)) remaining")
+          HStack(spacing: 3) {
+            Text(percent(snapshot.codex)).foregroundStyle(palette.foreground)
+            if snapshot.codex?.isCached() == true {
+              Image(systemName: "clock").font(.system(size: 8)).foregroundStyle(palette.secondary)
+            }
+          }.help(usageHelp(snapshot.codex)).accessibilityElement(children: .ignore)
+            .accessibilityLabel("Codex: \(usageHelp(snapshot.codex))")
         }.frame(maxWidth: .infinity)
         VStack(spacing: 8) {
           ProviderGauge(

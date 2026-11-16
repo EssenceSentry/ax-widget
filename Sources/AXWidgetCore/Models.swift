@@ -53,6 +53,23 @@ public struct Allowance: Codable, Identifiable, Equatable, Sendable {
     return 100 - used
   }
 
+  /// Codex publishes local allowance observations during activity. An idle
+  /// client can still display its last known value within that same window.
+  /// This does not change the stricter freshness check above.
+  public func displayRemaining(at now: Date = Date()) -> Double? {
+    if let fresh = remaining(at: now) { return fresh }
+    guard provider == .codex, ["fresh", "stale"].contains(status),
+      let used, used.isFinite, (0...100).contains(used), let observed,
+      observed <= now.addingTimeInterval(60), let resets,
+      observed < resets, resets > now
+    else { return nil }
+    return 100 - used
+  }
+
+  public func isCached(at now: Date = Date()) -> Bool {
+    displayRemaining(at: now) != nil && remaining(at: now) == nil
+  }
+
   public var windowLabel: String {
     if provider == .codex { return "Allowance" }
     return name == "five_hour" ? "5h" : "Week"
@@ -179,10 +196,15 @@ public struct Snapshot: Codable, Equatable, Sendable {
   }
 
   public var codex: Allowance? {
+    codex(at: Date())
+  }
+
+  func codex(at now: Date) -> Allowance? {
     let windows = ["secondary", "primary"].compactMap { name in
       allowances.first { $0.provider == .codex && $0.name == name }
     }
-    return windows.first { $0.remaining() != nil }
+    return windows.first { $0.remaining(at: now) != nil }
+      ?? windows.first { $0.displayRemaining(at: now) != nil }
       ?? windows.first { $0.used != nil } ?? windows.first
   }
   public var claudeFiveHour: Allowance? {

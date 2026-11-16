@@ -15,10 +15,13 @@ struct Provider: TimelineProvider {
   }
   func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
     let now = Date()
+    let snapshot = SnapshotStore.read()
+    let regularRefresh = now.addingTimeInterval(15 * 60)
+    let nextReset = snapshot.allowances.compactMap(\.resets).filter { $0 > now }.min()
     completion(
       Timeline(
-        entries: [Entry(date: now, snapshot: SnapshotStore.read())],
-        policy: .after(now.addingTimeInterval(15 * 60))))
+        entries: [Entry(date: now, snapshot: snapshot)],
+        policy: .after(min(regularRefresh, nextReset ?? regularRefresh))))
   }
 }
 

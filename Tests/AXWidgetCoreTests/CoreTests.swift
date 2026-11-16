@@ -121,10 +121,67 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
     Allowance(
       provider: .codex, name: "primary", used: 99, observed: now,
       resets: now.addingTimeInterval(10), status: "fresh"))
-  #expect(snapshot.codex?.name == "secondary")
-  #expect(snapshot.codex?.remaining(at: now) == 61)
+  #expect(snapshot.codex(at: now)?.name == "secondary")
+  #expect(snapshot.codex(at: now)?.remaining(at: now) == 61)
   #expect(snapshot.claudeFiveHour?.remaining(at: now) == 22)
   #expect(snapshot.claudeWeekly?.remaining(at: now) == 41)
+}
+
+@Test func idleCodexDisplayKeepsItsObservationWithoutClaimingItIsFresh() {
+  var value = Allowance(
+    provider: .codex, name: "primary", used: 48,
+    observed: now, resets: now.addingTimeInterval(7200), status: "fresh")
+  #expect(value.remaining(at: now.addingTimeInterval(300)) == 52)
+  #expect(!value.isCached(at: now.addingTimeInterval(300)))
+  let idle = now.addingTimeInterval(301)
+  #expect(value.remaining(at: idle) == nil)
+  #expect(value.displayRemaining(at: idle) == 52)
+  #expect(value.isCached(at: idle))
+  #expect(value.displayRemaining(at: now.addingTimeInterval(7199)) == 52)
+  #expect(value.displayRemaining(at: now.addingTimeInterval(7200)) == nil)
+  value.status = "stale"
+  #expect(value.displayRemaining(at: idle) == 52)
+  for status in ["unavailable", "unknown", "error"] {
+    value.status = status
+    #expect(value.displayRemaining(at: idle) == nil)
+  }
+  value.status = "fresh"
+  value.provider = .claude
+  #expect(value.displayRemaining(at: idle) == nil)
+  value.provider = .codex
+  for invalid in [Double.nan, .infinity, -1, 101] {
+    value.used = invalid
+    #expect(value.displayRemaining(at: idle) == nil)
+  }
+  value.used = 48
+  value.observed = now.addingTimeInterval(61)
+  #expect(value.displayRemaining(at: now) == nil)
+  value.observed = nil
+  #expect(value.displayRemaining(at: idle) == nil)
+  value.observed = now
+  value.resets = nil
+  #expect(value.displayRemaining(at: idle) == nil)
+}
+
+@Test func codexSelectsFreshUsageThenAValidCachedWindow() {
+  var snapshot = Snapshot(allowances: [
+    Allowance(
+      provider: .codex, name: "secondary", used: 39,
+      observed: now.addingTimeInterval(-600), resets: now.addingTimeInterval(-1), status: "stale"),
+    Allowance(
+      provider: .codex, name: "primary", used: 48,
+      observed: now.addingTimeInterval(-600), resets: now.addingTimeInterval(7200), status: "stale"),
+  ])
+  #expect(snapshot.codex(at: now)?.name == "primary")
+  #expect(snapshot.codex(at: now)?.displayRemaining(at: now) == 52)
+  snapshot.allowances[0].resets = now.addingTimeInterval(86400)
+  snapshot.allowances[1].observed = now
+  snapshot.allowances[1].status = "fresh"
+  #expect(snapshot.codex(at: now)?.name == "primary")
+  snapshot.allowances[1].used = nil
+  snapshot.allowances[1].status = "unavailable"
+  #expect(snapshot.codex(at: now)?.name == "secondary")
+  #expect(snapshot.codex(at: now)?.isCached(at: now) == true)
 }
 
 @Test func activeJobCountDoesNotHideAnotherJobsNumericProgress() {

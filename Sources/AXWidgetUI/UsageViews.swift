@@ -77,13 +77,14 @@ public struct ProviderGauge: View {
   }
 
   private func ring(_ allowance: Allowance?, color: Color, inset: CGFloat) -> some View {
-    let value = allowance?.remaining()
+    let value = allowance?.displayRemaining()
     return ZStack {
       Circle().stroke(palette.track, style: StrokeStyle(lineWidth: 2.5))
       if let value {
         Circle().trim(from: 0, to: value / 100)
           .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
           .rotationEffect(.degrees(-90))
+          .opacity(allowance?.isCached() == true ? 0.7 : 1)
       }
     }.padding(inset)
   }
@@ -95,16 +96,7 @@ public struct ProviderGauge: View {
       ([provider.label]
       + windows.map { allowance in
         guard let allowance else { return "Allowance unavailable" }
-        let value =
-          allowance.remaining().map { "\(Int($0.rounded()))% remaining" } ?? "Unknown or stale"
-        let reset =
-          allowance.resets.map {
-            "resets \($0.formatted(.dateTime.weekday(.abbreviated).hour().minute()))"
-          } ?? "reset unknown"
-        let age =
-          allowance.observed.map { "observed \($0.formatted(.relative(presentation: .numeric)))" }
-          ?? "not observed"
-        return "\(allowance.windowLabel): \(value) · \(reset) · \(age)"
+        return "\(allowance.windowLabel): \(usageHelp(allowance))"
       }).joined(separator: "\n")
   }
 }
@@ -156,7 +148,13 @@ public struct UsageFooter: View {
     HStack(spacing: 8) {
       Text("Remaining").foregroundStyle(palette.secondary)
       separator
-      Text("Codex \(percent(snapshot.codex))").help(reset(snapshot.codex))
+      HStack(spacing: 3) {
+        Text("Codex \(percent(snapshot.codex))")
+        if snapshot.codex?.isCached() == true {
+          Image(systemName: "clock").font(.system(size: 8))
+        }
+      }.help(usageHelp(snapshot.codex)).accessibilityElement(children: .ignore)
+        .accessibilityLabel("Codex: \(usageHelp(snapshot.codex))")
       separator
       Text("Claude 5h \(percent(snapshot.claudeFiveHour)) · Week \(percent(snapshot.claudeWeekly))")
         .help("5h: \(reset(snapshot.claudeFiveHour))\nWeek: \(reset(snapshot.claudeWeekly))")
@@ -170,7 +168,18 @@ public struct UsageFooter: View {
 }
 
 public func percent(_ allowance: Allowance?) -> String {
-  allowance?.remaining().map { "\(Int($0.rounded()))%" } ?? "—"
+  allowance?.displayRemaining().map { "\(Int($0.rounded()))%" } ?? "—"
+}
+
+public func usageHelp(_ allowance: Allowance?) -> String {
+  guard let allowance else { return "Allowance unavailable" }
+  let value =
+    allowance.displayRemaining().map { "\(Int($0.rounded()))% remaining" } ?? "Unknown or stale"
+  let prefix = allowance.isCached() ? "Cached · last observed " : ""
+  let age =
+    allowance.observed.map { "observed \($0.formatted(.relative(presentation: .numeric)))" }
+    ?? "not observed"
+  return "\(prefix)\(value) · \(reset(allowance)) · \(age)"
 }
 
 public func reset(_ allowance: Allowance?) -> String {

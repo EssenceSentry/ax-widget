@@ -58,7 +58,11 @@ are included. There is no brand/count header and no built-in chat editor.
   to request access, then enable **AX Widget** in macOS Accessibility settings.
   Background refresh never requests permission. Answers submitted in Claude
   clear from the widget when its native tool-result record is saved.
-- Unknown, stale, or expired usage shows a neutral continuous track and an em dash.
+- Idle Codex keeps its last observed allowance until that allowance resets.
+  After five minutes without a fresh observation, a small clock and a dimmer
+  continuous ring mark the cached reading; hover for its age and reset time.
+  Freshness validation remains separate from this display cache.
+- Unknown, unavailable, expired, and stale Claude usage shows a neutral track and an em dash.
 - All rings use continuous strokes. The supplied OpenAI and Claude SVG marks stay
   vector artwork; OpenAI adapts to the selected appearance.
 - The menu-bar icon is a pure-white axe silhouette. Right-click it to control Keep floating,
@@ -82,7 +86,8 @@ Notification Center widget renders the new snapshot.
 Claude and Codex can both be closed while AX Widget runs. It reads their saved
 local histories and keeps the last available updates; clicking a conversation or
 new-chat action launches its provider app. It never launches an agent just to
-refresh a view. Usage that is no longer fresh stays unknown.
+refresh a view. Idle Codex readings remain visible as cached until their recorded
+reset. Expired or unavailable allowances stay unknown.
 
 The widget reads a private snapshot written by the app; keep the app running for
 new data. macOS controls its refresh timing, so it is a glanceable snapshot.

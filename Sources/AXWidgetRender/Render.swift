@@ -54,11 +54,18 @@ import SwiftUI
         SmallUsageWidget(snapshot: snapshot).padding(14).background(palette.background),
         width: 170, height: 170,
         to: output.appendingPathComponent("\(appearance.rawValue)-usage-widget.png"))
-      for status in ["full", "unavailable"] {
+      for status in ["full", "unavailable", "cached"] {
         var variant = snapshot
         for index in variant.allowances.indices {
-          variant.allowances[index].used = status == "full" ? 0 : nil
-          variant.allowances[index].status = status == "full" ? "fresh" : "unavailable"
+          if status == "cached" {
+            if variant.allowances[index].provider == .codex {
+              variant.allowances[index].observed = Date().addingTimeInterval(-900)
+              variant.allowances[index].status = "stale"
+            }
+          } else {
+            variant.allowances[index].used = status == "full" ? 0 : nil
+            variant.allowances[index].status = status == "full" ? "fresh" : "unavailable"
+          }
         }
         try render(
           SmallUsageWidget(snapshot: variant).padding(14).background(palette.background),
