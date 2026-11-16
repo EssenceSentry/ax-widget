@@ -1,0 +1,10 @@
+.build/
+.swiftpm/
+build/
+dist/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+*.xcresult
+.DS_Store
+AXWidget.xcodeproj/

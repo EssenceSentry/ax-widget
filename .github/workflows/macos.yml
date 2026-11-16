@@ -1,0 +1,34 @@
+name: macOS
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Test core behavior
+        run: swift test --jobs 2
+      - name: Install project generator
+        run: brew install xcodegen
+      - name: Build app and real WidgetKit extension
+        run: scripts/build.sh
+      - name: Verify embedded extension
+        run: |
+          test -x 'dist/AX Widget.app/Contents/PlugIns/AXWidgetExtension.appex/Contents/MacOS/AXWidgetExtension'
+          codesign --verify --deep --strict 'dist/AX Widget.app'
+          ditto -c -k --sequesterRsrc --keepParent 'dist/AX Widget.app' dist/AX-Widget-macOS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AX-Widget-macOS
+          path: dist/AX-Widget-macOS.zip
+          retention-days: 14

@@ -1,0 +1,66 @@
+name: AXWidget
+options:
+  bundleIdPrefix: com.essencesentry
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+packages:
+  AXWidgetPackage:
+    path: .
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGNING_ALLOWED: NO
+targets:
+  AXWidget:
+    type: application
+    platform: macOS
+    sources: [Sources/AXWidgetApp]
+    info:
+      path: Config/AppInfo.plist
+    settings:
+      base:
+        PRODUCT_NAME: AXWidget
+        PRODUCT_BUNDLE_IDENTIFIER: com.essencesentry.ax-widget
+        ENABLE_HARDENED_RUNTIME: YES
+    dependencies:
+      - package: AXWidgetPackage
+        product: AXWidgetCore
+      - package: AXWidgetPackage
+        product: AXWidgetUI
+      - target: AXWidgetExtension
+        embed: true
+        codeSign: false
+  AXWidgetExtension:
+    type: app-extension
+    platform: macOS
+    sources: [Sources/AXWidgetExtension]
+    info:
+      path: Config/WidgetInfo.plist
+    entitlements:
+      path: Config/Widget.entitlements
+    settings:
+      base:
+        PRODUCT_NAME: AXWidgetExtension
+        PRODUCT_BUNDLE_IDENTIFIER: com.essencesentry.ax-widget.widgets
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SKIP_INSTALL: YES
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../Frameworks @executable_path/../../../../Frameworks"
+    dependencies:
+      - package: AXWidgetPackage
+        product: AXWidgetCore
+      - package: AXWidgetPackage
+        product: AXWidgetUI
+schemes:
+  AXWidget:
+    build:
+      targets:
+        AXWidget: all
+    run:
+      config: Debug
+    archive:
+      config: Release
