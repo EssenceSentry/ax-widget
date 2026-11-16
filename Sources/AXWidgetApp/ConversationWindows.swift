@@ -351,14 +351,33 @@ enum WindowAX {
       AXUIElementSetAttributeValue(element, kAXPositionAttribute as CFString, p) == .success
     else { throw WindowGroupError.cannotFit }
   }
-  private static func press(_ nodes: [AXUIElement], names: Set<String>) -> Bool {
+  private static func press(
+    _ nodes: [AXUIElement], names: Set<String>, roles: Set<String> = ["AXMenuItem"]
+  ) -> Bool {
     let matches = nodes.filter { node in
-      ["AXMenuItem", "AXButton"].contains(value(node, kAXRoleAttribute) as? String ?? "")
+      roles.contains(value(node, kAXRoleAttribute) as? String ?? "")
         && names.contains(name(node).lowercased())
         && value(node, kAXEnabledAttribute) as? Bool != false
     }
     return matches.count == 1
       && AXUIElementPerformAction(matches[0], kAXPressAction as CFString) == .success
+  }
+  private static func searchPaletteScope(_ field: AXUIElement) -> AXUIElement? {
+    var current = field
+    for _ in 0..<6 {
+      guard let raw = value(current, kAXParentAttribute) else { return nil }
+      current = raw as! AXUIElement
+      let role = value(current, kAXRoleAttribute) as? String ?? ""
+      let subrole = value(current, kAXSubroleAttribute) as? String ?? ""
+      if ["AXWindow", "AXWebArea"].contains(role) { return nil }
+      if role == "AXDialog" || subrole == "AXDialog" { return current }
+      if nodes(current, maxDepth: 6, limit: 250).contains(where: {
+        ["AXListBox", "AXList", "AXMenu"].contains(value($0, kAXRoleAttribute) as? String ?? "")
+      }) {
+        return current
+      }
+    }
+    return nil
   }
   private static func key(_ pid: pid_t, code: CGKeyCode, flags: CGEventFlags = []) {
     for down in [true, false] {
@@ -388,8 +407,15 @@ enum WindowAX {
       }
     }
     if shownSidebar { try await Task.sleep(nanoseconds: 250_000_000) }
-    let controls = nodes(window).filter {
-      ["AXLink", "AXRow", "AXButton"].contains(value($0, kAXRoleAttribute) as? String ?? "")
+    let bounds = frame(window)
+    let controls = nodes(window).filter { node in
+      guard
+        ["AXLink", "AXRow", "AXButton"].contains(value(node, kAXRoleAttribute) as? String ?? ""),
+        let bounds, let rect = frame(node)
+      else { return false }
+      // Only full sidebar rows; chat answer buttons and the composer are out of scope.
+      return rect.minX >= bounds.minX && rect.maxX <= bounds.minX + 360
+        && rect.width >= 100 && rect.height > 0 && rect.height < 120
     }
     let linked = controls.filter { node in
       guard let url = value(node, "AXURL") else { return false }
@@ -450,13 +476,15 @@ enum WindowAX {
         let label = name(node) + " " + (value(node, "AXPlaceholderValue") as? String ?? "")
         return label.lowercased().contains("search")
       }
-      if fields.count == 1, let field = fields.first,
+      if fields.count == 1, let field = fields.first, let scope = searchPaletteScope(field),
         AXUIElementSetAttributeValue(
           field, kAXValueAttribute as CFString, "Open in new window" as CFString) == .success
       {
         for _ in 0..<8 {
           try await Task.sleep(nanoseconds: 150_000_000)
-          if press(nodes(app), names: direct) { return }
+          if press(nodes(scope), names: direct, roles: ["AXMenuItem", "AXRow", "AXButton"]) {
+            return
+          }
         }
         break
       }
