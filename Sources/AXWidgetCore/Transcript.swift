@@ -3,6 +3,7 @@ import Foundation
 public struct TranscriptUpdate: Equatable {
   public var text = ""
   public var date: Date?
+  public var activityDate: Date?
   public var needsInput = false
   public var questions: [AgentQuestionGroup] = []
   public init() {}
@@ -66,6 +67,11 @@ public enum TranscriptReader {
       let type = row["type"] as? String
       let payload = row["payload"] as? [String: Any] ?? [:]
       let stamp = parseDate(row["timestamp"])
+      if isConversationActivity(row), let stamp,
+        update.activityDate.map({ stamp > $0 }) ?? true
+      {
+        update.activityDate = stamp
+      }
       var text: String?
       if type == "response_item" {
         if payload["type"] as? String == "message", payload["role"] as? String == "assistant",
@@ -86,6 +92,27 @@ public enum TranscriptReader {
     update.questions = tracker.pending
     update.needsInput = !update.questions.isEmpty
     return update
+  }
+
+  private static func isConversationActivity(_ row: [String: Any]) -> Bool {
+    let type = row["type"] as? String ?? ""
+    let payload = row["payload"] as? [String: Any] ?? [:]
+    if type == "response_item" {
+      let kind = payload["type"] as? String ?? ""
+      if kind == "message" {
+        return ["user", "assistant"].contains(payload["role"] as? String ?? "")
+      }
+      return kind == "reasoning" || kind.hasSuffix("_call") || kind.hasSuffix("_call_output")
+    }
+    if type == "event_msg" {
+      return [
+        "user_message", "agent_message", "agent_reasoning", "task_started", "task_complete",
+        "turn_aborted", "exec_command_begin", "exec_command_end", "exec_command_output_delta",
+      ].contains(payload["type"] as? String ?? "")
+    }
+    // Opening a chat can update settings, usage and other bookkeeping records.
+    // Only actual Claude messages and running-tool progress count as activity.
+    return ["user", "assistant", "progress"].contains(type) && row["isMeta"] as? Bool != true
   }
 
   private static func textBlocks(_ value: Any?) -> String? {

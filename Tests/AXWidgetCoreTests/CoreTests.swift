@@ -345,7 +345,7 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
     at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
   let content =
     #"{"type":"user","entrypoint":"cli","message":{"content":"Review"}}"# + "\n"
-    + #"{"type":"assistant","timestamp":"2026-11-16T12:00:00Z","message":{"content":[{"type":"text","text":"Reviewed the environment repair."}]}}"#
+    + "{\"type\":\"assistant\",\"timestamp\":\"\(ISO8601DateFormatter().string(from: now))\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"Reviewed the environment repair.\"}]}}"
   try content.write(to: source, atomically: true, encoding: .utf8)
   let record: [String: Any] = [
     "sessionId": nativeID, "cliSessionId": id, "cwd": cwd, "title": "Integration review",

@@ -117,15 +117,15 @@ public struct LocalRepository {
     }
 
     var progress: [String: TaskProgress] = [:]
+    var jobActivity: [String: Date] = [:]
     do {
       let rows =
         try DaemonClient.request("task.list", dataDirectory: paths.axData) as? [[String: Any]] ?? []
       for row in rows {
         guard let owner = row["owner"] as? String else { continue }
-        if let activity = parseDate(row["updated"]), let conversation = found[owner],
-          activity > conversation.updated
-        {
-          found[owner]?.updated = activity
+        if let activity = parseDate(row["updated"]) {
+          jobActivity[owner] = max(jobActivity[owner] ?? .distantPast, activity)
+          if activity > found[owner]?.updated ?? .distantPast { found[owner]?.updated = activity }
         }
         let job = TaskProgress(
           done: row["done"] as? Double, total: row["total"] as? Double,
@@ -152,7 +152,14 @@ public struct LocalRepository {
     // Filter SDK workers before limiting candidates: many recent worker sessions
     // must not crowd older, real conversations out of the widget.
     let candidates = found.values.filter { item in
-      guard !excluded.contains(item.id), item.updated >= cutoff || pinnedIDs.contains(item.id)
+      guard !excluded.contains(item.id) else { return false }
+      let modified = item.source.flatMap {
+        try? URL(fileURLWithPath: $0).resourceValues(forKeys: [.contentModificationDateKey])
+          .contentModificationDate
+      }
+      guard
+        item.updated >= cutoff || pinnedIDs.contains(item.id)
+          || modified.map({ $0 >= cutoff }) == true
       else { return false }
       return item.source.map {
         TranscriptReader.isMainConversation(
@@ -163,16 +170,19 @@ public struct LocalRepository {
     .sorted {
       if pinnedIDs.contains($0.id) != pinnedIDs.contains($1.id) { return pinnedIDs.contains($0.id) }
       return $0.updated > $1.updated
-    }.prefix(24)
+    }
     var items: [Conversation] = []
     for var item in candidates {
+      // Provider metadata is a discovery hint, not proof of conversation activity.
+      // Codex bumps updated_at when an existing chat merely applies window settings.
+      item.updated = jobActivity[item.id] ?? .distantPast
       item.progress = progress[item.id]
       if let source = item.source {
         do {
           let update = try TranscriptReader.read(URL(fileURLWithPath: source))
           item.latestUpdate = update.text
           item.updateAt = update.date
-          if let activity = update.date, activity > item.updated { item.updated = activity }
+          if let activity = update.activityDate, activity > item.updated { item.updated = activity }
           item.needsAttention = update.needsInput
           item.questions = update.questions
         } catch {
@@ -180,7 +190,7 @@ public struct LocalRepository {
           item.latestUpdate = ""
         }
       }
-      items.append(item)
+      if item.updated >= cutoff || pinnedIDs.contains(item.id) { items.append(item) }
     }
     return (group.ordered(items, limit: limit), issues)
   }

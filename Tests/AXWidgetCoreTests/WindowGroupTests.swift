@@ -62,9 +62,15 @@ private func chat(_ index: Int, date: Date = Date()) -> Conversation {
     "CREATE TABLE threads(id TEXT,title TEXT,cwd TEXT,rollout_path TEXT,updated_at REAL,archived INT)",
     nil, nil, nil)
   for item in [older, recent, newest] {
+    let source = home.appendingPathComponent(item.sessionID + ".jsonl")
+    let timestamp = ISO8601DateFormatter().string(from: item.updated)
+    try
+      "{\"type\":\"event_msg\",\"timestamp\":\"\(timestamp)\",\"payload\":{\"type\":\"agent_message\",\"message\":\"Update\"}}"
+      .write(
+        to: source, atomically: true, encoding: .utf8)
     sqlite3_exec(
       writer,
-      "INSERT INTO threads VALUES('\(item.sessionID)','\(item.title)','','',\(item.updated.timeIntervalSince1970),0)",
+      "INSERT INTO threads VALUES('\(item.sessionID)','\(item.title)','','\(source.path)',\(item.updated.timeIntervalSince1970),0)",
       nil, nil, nil)
   }
   let repository = LocalRepository(paths: paths)

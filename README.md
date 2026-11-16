@@ -28,7 +28,10 @@ are included. There is no brand/count header and no built-in chat editor.
   with a small gap. Dragging moves the pair together. Click outside or press
   Escape to close, or click the menu-bar icon again. The position is remembered
   and constrained to the screen.
-- Conversations are sorted by most recent activity, limited to the last 12 hours.
+- Conversations are sorted by actual message, reasoning, tool, or active-job activity,
+  limited to the last 12 hours. Opening a chat, changing its settings, or refreshing
+  usage does not count as activity. Unpinned chats need a recorded activity timestamp;
+  provider metadata alone cannot make an old chat recent.
   Pinned conversations remain first, in pin order, even after 12 hours.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. **More** appears only when the rendered preview actually

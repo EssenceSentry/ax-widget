@@ -185,7 +185,16 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
       if let host = details.contentView as? NSHostingView<PanelContent> {
         host.rootView = content(snapshot)
       } else {
-        details.contentView = NSHostingView(rootView: content(snapshot))
+        let host = NSHostingView(rootView: content(snapshot))
+        // SwiftUI's native glass composites separately from its content clip.
+        // Clip the actual window host too, so no rectangular backing leaks
+        // beyond the rounded surface when another window is underneath it.
+        host.wantsLayer = true
+        host.layer?.cornerRadius = 17
+        host.layer?.cornerCurve = .continuous
+        host.layer?.masksToBounds = true
+        host.focusRingType = .none
+        details.contentView = host
       }
     }
   }
@@ -225,7 +234,10 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     let height = min(naturalHeight, panel.frame.minY - gap - screen.minY - 12)
     let x = min(max(screen.minX + 12, panel.frame.maxX - 420), screen.maxX - 432)
     let frame = NSRect(x: x, y: panel.frame.minY - gap - height, width: 420, height: height)
-    if details.frame != frame { details.setFrame(frame, display: true) }
+    if details.frame != frame {
+      details.setFrame(frame, display: true)
+      details.invalidateShadow()
+    }
   }
 
   private func outsideClick() {
