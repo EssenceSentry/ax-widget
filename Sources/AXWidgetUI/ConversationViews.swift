@@ -150,6 +150,7 @@ public struct ConversationsView: View {
 }
 
 public struct PanelContent: View {
+  public static let headerHeight: CGFloat = 52
   public var snapshot: Snapshot
   public var collapse: () -> Void
   public var open: (Conversation) -> Void
@@ -171,13 +172,13 @@ public struct PanelContent: View {
     let palette = Palette(snapshot.appearance, scheme: scheme)
     VStack(spacing: 0) {
       ZStack {
-        Capsule().fill(palette.secondary.opacity(0.35)).frame(width: 21, height: 3)
+        CollapsedView(snapshot: snapshot)
         HStack {
           Spacer()
           Button(action: collapse) { Image(systemName: "chevron.down").font(.system(size: 10)) }
             .buttonStyle(.plain).foregroundStyle(palette.secondary).help("Collapse · Esc")
         }
-      }.frame(height: 16).padding(.horizontal, 12)
+      }.frame(height: Self.headerHeight).padding(.horizontal, 12)
       if nativeEffects {
         ScrollView {
           ConversationsView(snapshot: snapshot, open: open).padding(.horizontal, 18).padding(
@@ -188,7 +189,7 @@ public struct PanelContent: View {
               GeometryReader { geometry in
                 Color.clear.onChange(of: geometry.size.height, initial: true) { _, height in
                   // Wait until this layout pass finishes before resizing the NSPanel.
-                  DispatchQueue.main.async { heightChanged?(height + 16) }
+                  DispatchQueue.main.async { heightChanged?(height + Self.headerHeight) }
                 }
               }
             }

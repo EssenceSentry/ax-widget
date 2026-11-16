@@ -17,6 +17,19 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
   #expect(rendered.runs.contains { $0.link == URL(string: "https://example.com") })
 }
 
+@Test func unavailableSecondaryDoesNotHideFreshCodexAllowance() {
+  let date = Date()
+  let primary = Allowance(
+    provider: .codex, name: "primary", used: 45, observed: date,
+    resets: date.addingTimeInterval(3600), status: "fresh")
+  let unavailable = Allowance(
+    provider: .codex, name: "secondary", used: nil, observed: date,
+    resets: nil, status: "unavailable")
+  let snapshot = Snapshot(allowances: [primary, unavailable])
+  #expect(snapshot.codex?.name == "primary")
+  #expect(snapshot.codex?.remaining() == 55)
+}
+
 @Test func remainingIsAllowanceLeftAndNeverInvented() {
   let valid = Allowance(
     provider: .claude, name: "five_hour", used: 78, observed: now,

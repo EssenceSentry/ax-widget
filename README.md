@@ -16,6 +16,7 @@ are included. There is no brand/count header and no built-in chat editor.
 - Hover for percentage remaining, reset time, and observation age.
 - Drag the icon pair to position it. Click to expand; click outside or press
   Escape to collapse. The position is remembered and constrained to the screen.
+- The same icon pair and usage rings stay visible at the top when expanded.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. More expands the text in place. The panel grows and shrinks
   with its content; scrolling begins only at the available screen height.

@@ -92,7 +92,8 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     let measurement = NSHostingView(
       rootView: ConversationsView(snapshot: store.snapshot, open: { _ in })
         .frame(width: 384).fixedSize(horizontal: false, vertical: true))
-    let height = min(measurement.fittingSize.height + 43, screen.height - 24)
+    let height = min(
+      measurement.fittingSize.height + 27 + PanelContent.headerHeight, screen.height - 24)
     let frame = NSRect(
       x: min(max(screen.minX + 12, collapsedOrigin.x - 324), screen.maxX - 432),
       y: min(max(screen.minY + 12, collapsedOrigin.y + 48 - height), screen.maxY - height - 12),

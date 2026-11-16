@@ -155,8 +155,11 @@ public struct Snapshot: Codable, Equatable, Sendable {
   }
 
   public var codex: Allowance? {
-    allowances.first { $0.provider == .codex && $0.name == "secondary" }
-      ?? allowances.first { $0.provider == .codex && $0.name == "primary" }
+    let windows = ["secondary", "primary"].compactMap { name in
+      allowances.first { $0.provider == .codex && $0.name == name }
+    }
+    return windows.first { $0.remaining() != nil }
+      ?? windows.first { $0.used != nil } ?? windows.first
   }
   public var claudeFiveHour: Allowance? {
     allowances.first { $0.provider == .claude && $0.name == "five_hour" }
