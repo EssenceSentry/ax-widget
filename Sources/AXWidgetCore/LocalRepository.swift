@@ -19,7 +19,10 @@ public struct LocalRepository {
   public var paths: LocalPaths
   public init(paths: LocalPaths = LocalPaths()) { self.paths = paths }
 
-  public func conversations(limit: Int = 8) -> (items: [Conversation], issues: [String]) {
+  public func conversations(limit: Int = 8, at date: Date = Date()) -> (
+    items: [Conversation], issues: [String]
+  ) {
+    let cutoff = date.addingTimeInterval(-12 * 3600)
     var found: [String: Conversation] = [:]
     var issues: [String] = []
     var excluded: Set<String> = []
@@ -129,15 +132,11 @@ public struct LocalRepository {
     // Filter SDK workers before limiting candidates: many recent worker sessions
     // must not crowd older, real conversations out of the widget.
     let candidates = found.values.filter { item in
-      guard !excluded.contains(item.id) else { return false }
+      guard !excluded.contains(item.id), item.updated >= cutoff else { return false }
       return item.source.map { TranscriptReader.isMainConversation(URL(fileURLWithPath: $0)) }
         ?? true
     }
-    .sorted {
-      let a = progress[$0.id] != nil
-      let b = progress[$1.id] != nil
-      return a == b ? $0.updated > $1.updated : a
-    }.prefix(24)
+    .sorted { $0.updated > $1.updated }.prefix(24)
     var items: [Conversation] = []
     for var item in candidates {
       item.progress = progress[item.id]
@@ -146,6 +145,7 @@ public struct LocalRepository {
           let update = try TranscriptReader.read(URL(fileURLWithPath: source))
           item.latestUpdate = update.text
           item.updateAt = update.date
+          if let activity = update.date, activity > item.updated { item.updated = activity }
           item.needsAttention = update.needsInput
         } catch {
           // Missing or compressed source is visible as an unavailable update, never fabricated.
@@ -154,11 +154,7 @@ public struct LocalRepository {
       }
       items.append(item)
     }
-    items.sort {
-      let lhs = ($0.needsAttention ? 2 : 0) + (($0.progress?.runningCount ?? 0) > 0 ? 1 : 0)
-      let rhs = ($1.needsAttention ? 2 : 0) + (($1.progress?.runningCount ?? 0) > 0 ? 1 : 0)
-      return lhs == rhs ? $0.updated > $1.updated : lhs > rhs
-    }
+    items.sort { $0.updated > $1.updated }
     return (Array(items.prefix(limit)), issues)
   }
 

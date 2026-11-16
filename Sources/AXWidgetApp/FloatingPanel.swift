@@ -34,11 +34,12 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
 @MainActor final class FloatingController: NSObject, NSWindowDelegate {
   let store: AppStore
   private let panel: UtilityPanel
+  private let details: UtilityPanel
   private var subscription: AnyCancellable?
   private var globalMonitor: Any?
   private var localMonitor: Any?
   private var expanded = false
-  private var expandedTop: CGFloat = 0
+  private var contentHeight: CGFloat = 0
   private var collapsedOrigin: NSPoint
   var openConversation: ((Conversation) -> Void)?
 
@@ -52,16 +53,21 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     panel = UtilityPanel(
       contentRect: NSRect(origin: collapsedOrigin, size: NSSize(width: 96, height: 48)),
       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    details = UtilityPanel(
+      contentRect: NSRect(x: x, y: y, width: 420, height: 1),
+      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     super.init()
-    panel.delegate = self
-    panel.title = "AX Widget"
-    panel.level = .floating
-    panel.isOpaque = false
-    panel.backgroundColor = .clear
-    panel.hasShadow = true
-    panel.hidesOnDeactivate = false
-    panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-    panel.isMovableByWindowBackground = true
+    for window in [panel, details] {
+      window.delegate = self
+      window.level = .floating
+      window.isOpaque = false
+      window.backgroundColor = .clear
+      window.hasShadow = true
+      window.hidesOnDeactivate = false
+      window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+    }
+    panel.title = "AX Widget · Usage"
+    details.title = "AX Widget · Conversations"
     subscription = store.$snapshot.sink { [weak self] snapshot in self?.update(snapshot) }
     globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
       [weak self] _ in
@@ -74,39 +80,38 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
         self?.collapse()
         return nil
       }
-      if event.window !== self?.panel { self?.outsideClick() }
+      if event.window !== self?.panel && event.window !== self?.details { self?.outsideClick() }
       return event
     }
     collapse()
   }
 
   func setVisible(_ visible: Bool) {
-    if visible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
+    if visible {
+      panel.orderFrontRegardless()
+      if expanded { details.orderFrontRegardless() }
+    } else {
+      details.orderOut(nil)
+      panel.orderOut(nil)
+    }
   }
 
   func expand() {
     guard !expanded else { return }
     collapsedOrigin = panel.frame.origin
     expanded = true
-    let screen = panel.screen?.visibleFrame ?? NSScreen.main!.visibleFrame
     let measurement = NSHostingView(
       rootView: ConversationsView(snapshot: store.snapshot, open: { _ in })
         .frame(width: 384).fixedSize(horizontal: false, vertical: true))
-    let height = min(
-      measurement.fittingSize.height + 27 + PanelContent.headerHeight, screen.height - 24)
-    let frame = NSRect(
-      x: min(max(screen.minX + 12, collapsedOrigin.x - 324), screen.maxX - 432),
-      y: min(max(screen.minY + 12, collapsedOrigin.y + 48 - height), screen.maxY - height - 12),
-      width: 420, height: height)
-    expandedTop = frame.maxY
-    panel.setFrame(
-      frame, display: true, animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+    fitContent(measurement.fittingSize.height + 27 + PanelContent.headerHeight)
     update(store.snapshot)
-    panel.makeKeyAndOrderFront(nil)
+    panel.orderFrontRegardless()
+    details.makeKeyAndOrderFront(nil)
   }
 
   func collapse() {
     expanded = false
+    details.orderOut(nil)
     let screen =
       panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
       ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
@@ -121,20 +126,22 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   }
 
   private func update(_ snapshot: Snapshot) {
+    if let host = panel.contentView as? CollapsedHost {
+      host.rootView = CollapsedView(snapshot: snapshot)
+    } else {
+      let host = CollapsedHost(rootView: CollapsedView(snapshot: snapshot))
+      host.clicked = { [weak self] in
+        guard let self else { return }
+        if self.expanded { self.collapse() } else { self.expand() }
+      }
+      host.moved = { [weak self] in self?.rememberPosition() }
+      panel.contentView = host
+    }
     if expanded {
-      if let host = panel.contentView as? NSHostingView<PanelContent> {
+      if let host = details.contentView as? NSHostingView<PanelContent> {
         host.rootView = content(snapshot)
       } else {
-        panel.contentView = NSHostingView(rootView: content(snapshot))
-      }
-    } else {
-      if let host = panel.contentView as? CollapsedHost {
-        host.rootView = CollapsedView(snapshot: snapshot)
-      } else {
-        let host = CollapsedHost(rootView: CollapsedView(snapshot: snapshot))
-        host.clicked = { [weak self] in self?.expand() }
-        host.moved = { [weak self] in self?.rememberPosition() }
-        panel.contentView = host
+        details.contentView = NSHostingView(rootView: content(snapshot))
       }
     }
   }
@@ -152,20 +159,32 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     guard expanded, naturalHeight.isFinite, naturalHeight > 0,
       let screen = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
     else { return }
-    let height = min(naturalHeight, screen.height - 24)
-    let y = max(screen.minY + 12, min(expandedTop, screen.maxY - 12) - height)
-    guard abs(panel.frame.height - height) > 0.5 || abs(panel.frame.minY - y) > 0.5 else { return }
-    panel.setFrame(NSRect(x: panel.frame.minX, y: y, width: 420, height: height), display: true)
+    contentHeight = naturalHeight
+    let gap: CGFloat = 8
+    // A pill placed at the very bottom needs a little room to open below it.
+    let minimum = min(naturalHeight, 160, screen.height - 84)
+    let requiredY = screen.minY + 12 + gap + minimum
+    if panel.frame.minY < requiredY {
+      panel.setFrameOrigin(NSPoint(x: panel.frame.minX, y: requiredY))
+    }
+    let height = min(naturalHeight, panel.frame.minY - gap - screen.minY - 12)
+    let x = min(max(screen.minX + 12, panel.frame.maxX - 420), screen.maxX - 432)
+    let frame = NSRect(x: x, y: panel.frame.minY - gap - height, width: 420, height: height)
+    if details.frame != frame { details.setFrame(frame, display: true) }
   }
 
   private func outsideClick() {
-    if expanded, !panel.frame.contains(NSEvent.mouseLocation) { collapse() }
+    if expanded, !panel.frame.contains(NSEvent.mouseLocation),
+      !details.frame.contains(NSEvent.mouseLocation)
+    {
+      collapse()
+    }
   }
 
   private func rememberPosition() {
-    guard !expanded else { return }
     collapsedOrigin = panel.frame.origin
     UserDefaults.standard.set(collapsedOrigin.x, forKey: "floatingX")
     UserDefaults.standard.set(collapsedOrigin.y, forKey: "floatingY")
+    if expanded { fitContent(contentHeight) }
   }
 }

@@ -78,16 +78,7 @@ import WidgetKit
         self.usage = allowances
         self.usageIssue = usageIssue
         if refreshUsage { self.lastUsage = Date() }
-        var stable = result
-        let order = Dictionary(
-          uniqueKeysWithValues: self.snapshot.conversations.enumerated().map { ($1.id, $0) })
-        stable.conversations.sort {
-          if $0.needsAttention != $1.needsAttention { return $0.needsAttention }
-          let a = order[$0.id] ?? -1
-          let b = order[$1.id] ?? -1
-          return a == b ? $0.updated > $1.updated : a < b
-        }
-        self.snapshot = stable
+        self.snapshot = result
         self.persist(reload: Date().timeIntervalSince(self.lastWidgetReload) >= 60)
       }
     }

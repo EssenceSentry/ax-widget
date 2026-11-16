@@ -14,14 +14,16 @@ are included. There is no brand/count header and no built-in chat editor.
 - Codex has one remaining-allowance ring. Claude's inner ring shows five-hour
   allowance and the outer ring shows weekly allowance.
 - Hover for percentage remaining, reset time, and observation age.
-- Drag the icon pair to position it. Click to expand; click outside or press
-  Escape to collapse. The position is remembered and constrained to the screen.
-- The same icon pair and usage rings stay visible at the top when expanded.
+- Drag the icon pair to position it. Click to open a separate conversation panel
+  just below it, with a small gap. The pill stays visible. Dragging moves the pair
+  together; clicking outside or pressing Escape hides only the lower panel.
+  The position is remembered and constrained to the screen.
+- Conversations are sorted by most recent activity, limited to the last 12 hours.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. More expands the text in place. The panel grows and shrinks
   with its content; scrolling begins only at the available screen height.
-- Updates render inline Markdown (bold, italics, code, and links), preserving
-  paragraph breaks when expanded.
+- Updates render native Markdown: bold, italics, links, headings, lists, code
+  blocks, and wrapping tables. Internal memory-citation markup is hidden.
 - Numeric progress comes from ax tasks. Reaching a task total does not imply
   that the conversation is complete.
 - Unknown, stale, or expired usage shows a neutral continuous track and an em dash.

@@ -28,8 +28,8 @@ public struct ConversationsView: View {
       }
       if snapshot.conversations.isEmpty {
         VStack(alignment: .leading, spacing: 8) {
-          Text("No recent conversations").font(.headline)
-          Text("Recent Claude and Codex conversations will appear here as you work.")
+          Text("No activity in the last 12 hours").font(.headline)
+          Text("Claude and Codex conversations will appear here as you work.")
             .font(.system(size: 12)).foregroundStyle(palette.secondary)
         }.padding(.vertical, 20)
       }
@@ -52,7 +52,9 @@ public struct ConversationsView: View {
   private func conversationRow(_ conversation: Conversation, featured: Bool, palette: Palette)
     -> some View
   {
-    VStack(alignment: .leading, spacing: compact ? 5 : 8) {
+    let document = MarkdownDocument(
+      conversation.latestUpdate.isEmpty ? "Latest update unavailable" : conversation.latestUpdate)
+    return VStack(alignment: .leading, spacing: compact ? 5 : 8) {
       HStack(alignment: .firstTextBaseline, spacing: 7) {
         title(conversation, palette: palette)
         Spacer(minLength: 3)
@@ -90,24 +92,13 @@ public struct ConversationsView: View {
         if conversation.needsAttention {
           Circle().fill(.orange).frame(width: 6, height: 6).padding(.top, 5)
         }
-        Text(
-          UpdateMarkdown.render(
-            conversation.latestUpdate.isEmpty
-              ? "Latest update unavailable"
-              : (presentation.expanded.contains(conversation.id)
-                ? conversation.latestUpdate
-                : conversation.latestUpdate.replacingOccurrences(of: "\n\n", with: " ")))
+        MarkdownUpdateView(
+          document: document, expanded: presentation.expanded.contains(conversation.id),
+          compact: compact, featured: featured, palette: palette
         )
-        .font(.system(size: compact ? 11 : 13))
         .foregroundStyle(conversation.latestUpdate.isEmpty ? palette.secondary : palette.foreground)
-        .lineSpacing(compact ? 1 : 3)
-        .lineLimit(
-          presentation.expanded.contains(conversation.id)
-            ? nil : (featured ? (compact ? 3 : 4) : (compact ? 1 : 2))
-        )
-        .fixedSize(horizontal: false, vertical: true)
       }
-      if !compact, conversation.latestUpdate.count > (featured ? 210 : 130) {
+      if !compact, document.blocks.count > 1 || document.source.count > (featured ? 160 : 80) {
         Button(presentation.expanded.contains(conversation.id) ? "Less" : "More") {
           if presentation.expanded.contains(conversation.id) {
             presentation.expanded.remove(conversation.id)
@@ -150,7 +141,7 @@ public struct ConversationsView: View {
 }
 
 public struct PanelContent: View {
-  public static let headerHeight: CGFloat = 52
+  public static let headerHeight: CGFloat = 16
   public var snapshot: Snapshot
   public var collapse: () -> Void
   public var open: (Conversation) -> Void
@@ -172,7 +163,7 @@ public struct PanelContent: View {
     let palette = Palette(snapshot.appearance, scheme: scheme)
     VStack(spacing: 0) {
       ZStack {
-        CollapsedView(snapshot: snapshot)
+        Capsule().fill(palette.secondary.opacity(0.35)).frame(width: 21, height: 3)
         HStack {
           Spacer()
           Button(action: collapse) { Image(systemName: "chevron.down").font(.system(size: 10)) }

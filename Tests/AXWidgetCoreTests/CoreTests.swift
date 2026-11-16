@@ -30,6 +30,43 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
   #expect(snapshot.codex?.remaining() == 55)
 }
 
+@Test func markdownTablesListsAndInternalMetadataAreStructured() {
+  let document = MarkdownDocument(
+    """
+    ## Plan
+
+    | Remaining work | Estimated effort |
+    |---|---:|
+    | Consolidate the **repairs** | 1–2 days |
+    | Complete `tests` | 2–4 days |
+
+    - First item
+    - Second item
+
+    ```swift
+    let ready = true
+    ```
+
+    <oai-mem-citation>
+    <citation_entries>internal provenance</citation_entries>
+    </oai-mem-citation>
+    """)
+  #expect(!document.source.contains("internal provenance"))
+  #expect(document.blocks.first?.kind == .heading(2))
+  let table = document.blocks.first { $0.kind == .table }
+  #expect(table?.rows.count == 3)
+  #expect(table?.columns.count == 2)
+  #expect(table?.rows[1][0].characters.contains("*") == false)
+  #expect(String(table!.rows[2][1].characters) == "2–4 days")
+  #expect(
+    document.blocks.filter {
+      if case .listItem = $0.kind { return true }
+      return false
+    }.count == 2)
+  #expect(document.blocks.last?.kind == .code)
+  #expect(MarkdownDocument.visibleSource("Visible\n<oai-mem-citation>truncated") == "Visible")
+}
+
 @Test func remainingIsAllowanceLeftAndNeverInvented() {
   let valid = Allowance(
     provider: .claude, name: "five_hour", used: 78, observed: now,
@@ -229,10 +266,13 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
     sqlite3_exec(writer, sql, nil, nil, nil)
   }
   sqlite3_close(writer)
-  let result = LocalRepository(paths: paths).conversations()
+  let result = LocalRepository(paths: paths).conversations(at: now)
   #expect(result.items.count == 1)
   #expect(result.items.first?.title == "Integration review")
   #expect(result.items.first?.desktopSessionID == nativeID)
   #expect(result.items.first?.latestUpdate == "Reviewed the environment repair.")
   #expect(try String(contentsOf: source, encoding: .utf8) == content)
+  #expect(
+    LocalRepository(paths: paths).conversations(at: now.addingTimeInterval(12 * 3600 + 1)).items
+      .isEmpty)
 }

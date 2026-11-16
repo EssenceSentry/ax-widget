@@ -13,7 +13,7 @@ import Foundation
     floating.openConversation = { [weak self] conversation in self?.open(conversation) }
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     statusItem.button?.image = NSImage(
-      systemSymbolName: "circle.dotted.circle", accessibilityDescription: "AX Widget")
+      systemSymbolName: "circle.circle", accessibilityDescription: "AX Widget")
     let menu = NSMenu()
     menu.delegate = self
     statusItem.menu = menu

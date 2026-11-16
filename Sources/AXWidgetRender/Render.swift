@@ -12,12 +12,41 @@ import SwiftUI
       var snapshot = Snapshot.demo()
       snapshot.appearance = appearance
       let palette = Palette(appearance, scheme: appearance == .carbon ? .dark : .light)
+      let markdown = MarkdownDocument(
+        """
+        ## Remaining work
+
+        | Work | Estimated effort |
+        |---|---:|
+        | Consolidate separate repairs into one coherent candidate and installed wheel | 1–2 days |
+        | Complete coverage, strict typing, and contract checks | 2–4 days |
+        | Resolve numerical and migration gates | 2–5 days |
+
+        Some work can run concurrently. The overall estimate is **5–10 days**.
+
+        - Validate one consistent environment.
+        - Review the *remaining* findings.
+        - Run `swift test` before delivery.
+
+        ```sh
+        ax run -- swift test
+        ```
+        """)
+      try render(
+        MarkdownUpdateView(
+          document: markdown, expanded: true, compact: false, featured: true, palette: palette
+        )
+        .padding(18).foregroundStyle(palette.foreground).background(palette.background),
+        width: 420, to: output.appendingPathComponent("\(appearance.rawValue)-markdown.png"))
       try render(
         CollapsedView(snapshot: snapshot).padding(12).background(palette.background),
         width: 120, height: 72,
         to: output.appendingPathComponent("\(appearance.rawValue)-collapsed.png"))
       try render(
-        PanelContent(snapshot: snapshot, nativeEffects: false, collapse: {}, open: { _ in }),
+        VStack(alignment: .trailing, spacing: 8) {
+          CollapsedView(snapshot: snapshot)
+          PanelContent(snapshot: snapshot, nativeEffects: false, collapse: {}, open: { _ in })
+        },
         width: 420,
         to: output.appendingPathComponent("\(appearance.rawValue)-expanded.png"))
       try render(
