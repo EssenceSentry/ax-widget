@@ -106,7 +106,7 @@ public struct LocalRepository {
       for row in rows {
         guard let owner = row["owner"] as? String else { continue }
         if progress[owner] != nil {
-          progress[owner]?.runningCount = 1
+          progress[owner]?.runningCount += 1
           continue
         }
         progress[owner] = TaskProgress(

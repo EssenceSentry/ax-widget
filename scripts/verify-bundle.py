@@ -14,7 +14,7 @@ with (extension / "Contents/Info.plist").open("rb") as stream:
     info = plistlib.load(stream)
 assert info["NSExtension"]["NSExtensionPointIdentifier"] == "com.apple.widgetkit-extension"
 result = subprocess.run(
-    ["codesign", "-d", "--entitlements", "-", str(extension)],
+    ["codesign", "-d", "--entitlements", "-", "--xml", str(extension)],
     capture_output=True, check=True,
 )
 entitlements = plistlib.loads(result.stdout)
