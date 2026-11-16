@@ -51,6 +51,13 @@ struct QuestionTracker {
   mutating func consume(_ row: [String: Any]) {
     let type = row["type"] as? String
     let payload = row["payload"] as? [String: Any] ?? [:]
+    if type == "event_msg", let event = payload["type"] as? String,
+      ["task_started", "turn_aborted"].contains(event)
+    {
+      groups.removeAll()
+      order.removeAll()
+      return
+    }
     if type == "response_item" {
       if payload["type"] as? String == "function_call", let name = payload["name"] as? String,
         let call = payload["call_id"] as? String,

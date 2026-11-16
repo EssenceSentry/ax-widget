@@ -124,10 +124,13 @@ these are not evidence of system-widget hosting.
 The app reads ax's conversation catalog and queries running tasks through its
 local daemon socket, supplements titles
 and registration from the native local clients, and reads a bounded recent tail
-of relevant transcripts for prose. A separate incremental question cursor keeps
-unanswered prompts visible even after lengthy tool output. Usage comes from `ax usage` once per minute, without
-`--refresh`. Conversation updates poll every four seconds; reads are performed
-off the main thread. Shared snapshots have owner-only permissions.
+of relevant transcripts for prose. Question cursors start at the latest Codex
+turn, discard prompts from earlier or interrupted turns, and retain pending
+questions through lengthy tool output within that turn. Existing conversation
+files are watched for changes, coalesced over 200 milliseconds, with a four-second
+discovery/fallback poll. Usage comes from `ax usage` once per minute, without
+`--refresh`, on a separate queue so allowance reads cannot delay questions.
+Reads are performed off the main thread. Shared snapshots have owner-only permissions.
 
 Claude conversations need an existing Desktop registration. If one is absent,
 the app explains that ax registers eligible sessions while Claude Desktop is

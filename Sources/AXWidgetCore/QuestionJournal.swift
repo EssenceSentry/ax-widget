@@ -13,10 +13,10 @@ enum QuestionJournal {
   }
   private static let lock = NSLock()
   private static var cursors: [String: Cursor] = [:]
-  private static let markers = [
+  private static let requestMarkers = [
     "request_user_input", "AskUserQuestion", "send_user_message_question_reply",
-    "function_call_output", "tool_result",
   ].map { Data($0.utf8) }
+  private static let boundaryMarkers = ["task_started", "turn_aborted"].map { Data($0.utf8) }
 
   static func pending(_ url: URL) throws -> [AgentQuestionGroup] {
     lock.lock()
@@ -24,10 +24,11 @@ enum QuestionJournal {
     let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
     let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value ?? 0
     let size = (attributes[.size] as? NSNumber)?.uint64Value ?? 0
-    var cursor = cursors[url.path] ?? Cursor(inode: inode)
-    if cursor.inode != inode || cursor.offset > size { cursor = Cursor(inode: inode) }
     let file = try FileHandle(forReadingFrom: url)
     defer { try? file.close() }
+    var cursor = cursors[url.path] ?? Cursor(inode: inode)
+    if cursor.inode != inode || cursor.offset > size { cursor = Cursor(inode: inode) }
+    if cursor.offset == 0 { cursor.offset = try latestTurnOffset(file, size: size) }
     try file.seek(toOffset: cursor.offset)
     while let chunk = try file.read(upToCount: 65_536), !chunk.isEmpty {
       cursor.offset += UInt64(chunk.count)
@@ -62,9 +63,60 @@ enum QuestionJournal {
   }
 
   private static func consume(_ data: Data, tracker: inout QuestionTracker) {
-    guard markers.contains(where: { data.range(of: $0) != nil }),
+    let isBoundary = boundaryMarkers.contains { data.range(of: $0) != nil }
+    let isRequest = requestMarkers.contains { data.range(of: $0) != nil }
+    // Ordinary tool output is often enormous. Only decode a result if it can
+    // actually belong to a pending synchronous question.
+    let isResult =
+      !isBoundary && !isRequest
+      && tracker.pending.contains { group in
+        group.kind != .codexAsync && data.range(of: Data(group.id.utf8)) != nil
+      }
+    guard isBoundary || isRequest || isResult,
       let row = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     else { return }
     tracker.consume(row)
+  }
+
+  /// Codex questions belong to the turn that asked them. Find its boundary
+  /// backwards using cheap byte checks, rather than replaying years of history.
+  private static func latestTurnOffset(_ file: FileHandle, size: UInt64) throws -> UInt64 {
+    try file.seek(toOffset: 0)
+    let header = try file.read(upToCount: 65_536) ?? Data()
+    guard let first = header.split(separator: 10).first,
+      let row = (try? JSONSerialization.jsonObject(with: Data(first))) as? [String: Any],
+      row["type"] as? String == "session_meta"
+    else { return 0 }
+    var end = size
+    var carry = Data()
+    while end > 0 {
+      let start = end > 524_288 ? end - 524_288 : 0
+      try file.seek(toOffset: start)
+      var chunk = try file.read(upToCount: Int(end - start)) ?? Data()
+      chunk.append(carry)
+      let lines = chunk.split(separator: 10, omittingEmptySubsequences: false)
+      let complete = start == 0 ? lines[...] : lines.dropFirst()
+      for line in complete.reversed() {
+        guard line.count < 4096 else { continue }
+        let data = Data(line)
+        guard boundaryMarkers.contains(where: { data.range(of: $0) != nil }),
+          let row = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+          row["type"] as? String == "event_msg",
+          let payload = row["payload"] as? [String: Any],
+          let event = payload["type"] as? String,
+          ["task_started", "turn_aborted"].contains(event)
+        else { continue }
+        return start + UInt64(line.startIndex - chunk.startIndex)
+      }
+      // A turn-boundary record is tiny. A partial huge tool record can be
+      // discarded; retaining a zero byte prevents it becoming valid JSON.
+      if let first = lines.first, first.count < 4096 {
+        carry = Data(first)
+      } else {
+        carry = Data([0])
+      }
+      end = start
+    }
+    return 0
   }
 }

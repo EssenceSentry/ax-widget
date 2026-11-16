@@ -7,12 +7,18 @@ import WidgetKit
 @MainActor final class AppStore: ObservableObject {
   @Published var snapshot: Snapshot
   private let queue = DispatchQueue(label: "ax-widget.local-data", qos: .utility)
+  private let usageQueue = DispatchQueue(label: "ax-widget.usage", qos: .utility)
   private var refreshing = false
+  private var usageRefreshing = false
+  private var refreshPending = false
   private var timer: Timer?
   private var lastUsage = Date.distantPast
   private var lastWidgetReload = Date.distantPast
   private var usage: [Allowance] = []
   private var usageIssue: String?
+  private let fileEvents = PassthroughSubject<Void, Never>()
+  private var fileSubscription: AnyCancellable?
+  private var transcriptMonitor: TranscriptMonitor?
   let demo: Bool
 
   var appearance: Appearance {
@@ -33,9 +39,16 @@ import WidgetKit
     snapshot.appearance =
       Appearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "system")
       ?? .system
+    usage = snapshot.allowances
   }
 
   func start() {
+    transcriptMonitor = TranscriptMonitor { [weak self] in self?.fileEvents.send() }
+    fileSubscription = fileEvents.throttle(
+      for: .milliseconds(200), scheduler: DispatchQueue.main, latest: true
+    )
+    .sink { [weak self] in self?.refresh() }
+    transcriptMonitor?.watch(Set(snapshot.conversations.compactMap(\.source)))
     refresh()
     timer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
       Task { @MainActor in self?.refresh() }
@@ -49,41 +62,60 @@ import WidgetKit
       snapshot = sample
       return
     }
-    guard !refreshing else { return }
+    refreshUsage(force: forceUsage)
+    guard !refreshing else {
+      refreshPending = true
+      return
+    }
     refreshing = true
-    let refreshUsage = forceUsage || Date().timeIntervalSince(lastUsage) >= 60
-    let appearance = appearance
-    let oldUsage = usage
-    let oldIssue = usageIssue
     queue.async { [weak self] in
       let (conversations, issues) = LocalRepository().conversations(limit: 6)
-      var allowances = oldUsage
-      var usageIssue = oldIssue
-      if refreshUsage {
-        if let binary = AxClient.executable() {
-          do {
-            allowances = try AxClient.usage(executable: binary)
-            usageIssue = nil
-          } catch { usageIssue = error.localizedDescription }
-        } else {
-          usageIssue = "Install ax to show allowance data."
-        }
-      }
-      let result = Snapshot(
-        allowances: allowances, conversations: conversations,
-        issues: issues + [usageIssue].compactMap { $0 }, appearance: appearance)
       Task { @MainActor in
         guard let self else { return }
         self.refreshing = false
-        self.usage = allowances
-        self.usageIssue = usageIssue
-        if refreshUsage { self.lastUsage = Date() }
+        let result = Snapshot(
+          allowances: self.usage, conversations: conversations,
+          issues: issues + [self.usageIssue].compactMap { $0 }, appearance: self.appearance)
         let oldQuestions = Set(self.snapshot.conversations.filter(\.needsAttention).map(\.id))
         let newQuestions = Set(result.conversations.filter(\.needsAttention).map(\.id))
         self.snapshot = result
+        self.transcriptMonitor?.watch(Set(conversations.compactMap(\.source)))
         self.persist(
           reload: oldQuestions != newQuestions
             || Date().timeIntervalSince(self.lastWidgetReload) >= 60)
+        if self.refreshPending {
+          self.refreshPending = false
+          self.refresh()
+        }
+      }
+    }
+  }
+
+  private func refreshUsage(force: Bool) {
+    guard !usageRefreshing, force || Date().timeIntervalSince(lastUsage) >= 60 else { return }
+    usageRefreshing = true
+    usageQueue.async { [weak self] in
+      var allowances: [Allowance]?
+      var issue: String?
+      if let binary = AxClient.executable() {
+        do { allowances = try AxClient.usage(executable: binary) } catch {
+          issue = error.localizedDescription
+        }
+      } else {
+        issue = "Install ax to show allowance data."
+      }
+      Task { @MainActor in
+        guard let self else { return }
+        self.usageRefreshing = false
+        self.lastUsage = Date()
+        if let allowances { self.usage = allowances }
+        let previousIssue = self.usageIssue
+        self.usageIssue = issue
+        self.snapshot.allowances = self.usage
+        self.snapshot.generated = Date()
+        self.snapshot.issues.removeAll { $0 == previousIssue }
+        if let issue { self.snapshot.issues.append(issue) }
+        self.persist(reload: true)
       }
     }
   }

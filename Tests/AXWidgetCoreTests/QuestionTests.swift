@@ -77,6 +77,40 @@ private func codexAsk(_ call: String = "call-widget", multiple: Bool = false) th
   #expect(pending.questions.map(\.id) == ["second"])
 }
 
+@Test func oldQuestionsDoNotSurviveANewOrAbortedCodexTurn() throws {
+  let old = try codexAsk("old-turn")
+  let newTurn = try line(["type": "event_msg", "payload": ["type": "task_started"]])
+  let complete = try line(["type": "event_msg", "payload": ["type": "task_complete"]])
+  let aborted = try line(["type": "event_msg", "payload": ["type": "turn_aborted"]])
+  #expect(TranscriptReader.parse([old, newTurn, complete]).questions.isEmpty)
+  let current = try codexAsk("current-turn")
+  #expect(
+    TranscriptReader.parse([old, newTurn, current, complete]).questions.map(\.id) == [
+      "current-turn"
+    ])
+  #expect(TranscriptReader.parse([newTurn, current, aborted]).questions.isEmpty)
+}
+
+@Test func coldQuestionReaderStartsAtLatestTurnAcrossLargeRecords() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("cold-boundary.jsonl")
+  let meta = try line(["type": "session_meta", "payload": ["id": "fixture"]])
+  let boundary = try line(["type": "event_msg", "payload": ["type": "task_started"]])
+  let noise = try line([
+    "type": "response_item",
+    "payload": [
+      "type": "function_call_output", "call_id": "not-a-question",
+      "output": String(repeating: "ordinary output ", count: 100_000),
+    ],
+  ])
+  try
+    ([meta, boundary, codexAsk("historical"), noise, boundary, codexAsk("current"), noise]
+    .joined(separator: "\n") + "\n").write(to: source, atomically: true, encoding: .utf8)
+  #expect(try TranscriptReader.read(source, maxBytes: 1024).questions.map(\.id) == ["current"])
+}
+
 @Test func questionRepliesPreserveNativeIdentityAndRejectEmptyAnswers() throws {
   let group = try #require(TranscriptReader.parse([codexAsk(multiple: true)]).questions.first)
   #expect(group.questions.first?.multiple == true)
