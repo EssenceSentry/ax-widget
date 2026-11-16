@@ -109,3 +109,29 @@ private func chat(_ index: Int, date: Date = Date()) -> Conversation {
     Snapshot.self, from: JSONSerialization.data(withJSONObject: object))
   #expect(old.pinnedConversationIDs == nil)
 }
+
+@Test func codexWindowTitlesRequireUniqueCurrentNativeSessionMapping() throws {
+  let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: home) }
+  var writer: OpaquePointer?
+  sqlite3_open(home.appendingPathComponent("state_5.sqlite").path, &writer)
+  defer { sqlite3_close(writer) }
+  let first = chat(1).sessionID
+  let second = chat(2).sessionID
+  sqlite3_exec(
+    writer,
+    "CREATE TABLE threads(id TEXT,title TEXT); INSERT INTO threads VALUES('\(first)','First'),('\(second)','Second')",
+    nil, nil, nil)
+  #expect(CodexWindowIdentity.title(sessionID: first, home: home) == "First")
+  let index = home.appendingPathComponent("session_index.jsonl")
+  try "{\"id\":\"\(first)\",\"thread_name\":\"Renamed\"}\n{unfinished".write(
+    to: index, atomically: true, encoding: .utf8)
+  #expect(CodexWindowIdentity.title(sessionID: first, home: home) == "Renamed")
+  try "{\"id\":\"\(first)\",\"thread_name\":\"Second\"}\n".write(
+    to: index, atomically: true, encoding: .utf8)
+  #expect(CodexWindowIdentity.title(sessionID: first, home: home) == nil)
+  #expect(CodexWindowIdentity.title(sessionID: second, home: home) == nil)
+  #expect(CodexWindowIdentity.title(sessionID: chat(3).sessionID, home: home) == nil)
+  #expect(CodexWindowIdentity.title(sessionID: "invalid", home: home) == nil)
+}

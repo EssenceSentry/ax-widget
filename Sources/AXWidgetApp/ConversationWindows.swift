@@ -249,7 +249,8 @@ import ApplicationServices
     let before = WindowAX.windows(pid)
     // Ask the native conversation context menu for a pop-out. No chat text is entered.
     try await WindowAX.openInNewWindow(pid: pid, window: selected, pin: pin)
-    while Date() < deadline {
+    let popoutDeadline = Date().addingTimeInterval(10)
+    while Date() < popoutDeadline {
       let created = WindowAX.windows(pid).filter { window in
         !before.contains { CFEqual($0, window) } && WindowAX.matches(window, pin: pin)
       }
@@ -280,16 +281,21 @@ enum WindowAX {
   }
   static func nodes(_ element: AXUIElement, maxDepth: Int = 24, limit: Int = 2400) -> [AXUIElement]
   {
-    let deadline = Date().addingTimeInterval(1.5)
+    let deadline = Date().addingTimeInterval(2)
     var result: [AXUIElement] = []
-    func visit(_ node: AXUIElement, _ depth: Int) {
-      guard depth <= maxDepth, result.count < limit, Date() < deadline else { return }
+    var pending: [(AXUIElement, Int)] = [(element, 0)]
+    var cursor = 0
+    // Breadth first: a long transcript must not hide later sidebar/menu siblings.
+    while cursor < pending.count, result.count < limit, Date() < deadline {
+      let (node, depth) = pending[cursor]
+      cursor += 1
       result.append(node)
-      for child in value(node, kAXChildrenAttribute) as? [AXUIElement] ?? [] {
-        visit(child, depth + 1)
+      if depth < maxDepth {
+        let children = value(node, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        pending.append(
+          contentsOf: children.prefix(max(0, limit * 2 - pending.count)).map { ($0, depth + 1) })
       }
     }
-    visit(element, 0)
     return result
   }
   static func name(_ element: AXUIElement) -> String {
@@ -298,21 +304,31 @@ enum WindowAX {
   }
   static func matches(_ window: AXUIElement, pin: ConversationPin) -> Bool {
     guard value(window, kAXRoleAttribute) as? String == kAXWindowRole else { return false }
-    let ids = [pin.sessionID, pin.desktopSessionID].compactMap { $0 }
-    for node in [window]
-      + nodes(window, maxDepth: 8, limit: 100).filter({
-        value($0, kAXRoleAttribute) as? String == "AXWebArea"
-      })
-    {
-      for attr in [kAXDocumentAttribute, "AXURL"] {
-        if let url = value(node, attr),
-          ids.contains(where: { String(describing: url).contains($0) })
-        {
-          return true
-        }
+    if pin.provider == .codex {
+      guard let title = CodexWindowIdentity.title(sessionID: pin.sessionID) else { return false }
+      return name(window) == title
+    }
+    guard let session = pin.desktopSessionID else { return false }
+    var pending: [(AXUIElement, Int)] = [(window, 0)]
+    var cursor = 0
+    let deadline = Date().addingTimeInterval(1)
+    while cursor < pending.count, cursor < 500, Date() < deadline {
+      let (node, depth) = pending[cursor]
+      cursor += 1
+      if value(node, kAXRoleAttribute) as? String == "AXWebArea",
+        let raw = value(node, "AXURL"), let url = URL(string: String(describing: raw)),
+        url.host == "claude.ai",
+        url.pathComponents.contains("epitaxy") || url.pathComponents.contains("code")
+      {
+        // The outer native conversation document is authoritative, not links or artifact content.
+        return url.pathComponents.contains(session)
+      }
+      if depth < 24 {
+        let children = value(node, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        pending.append(
+          contentsOf: children.prefix(max(0, 1000 - pending.count)).map { ($0, depth + 1) })
       }
     }
-    // Conversation titles are mutable and nonunique. They are never identity evidence.
     return false
   }
   static func frame(_ element: AXUIElement) -> CGRect? {
@@ -344,58 +360,110 @@ enum WindowAX {
     return matches.count == 1
       && AXUIElementPerformAction(matches[0], kAXPressAction as CFString) == .success
   }
+  private static func key(_ pid: pid_t, code: CGKeyCode, flags: CGEventFlags = []) {
+    for down in [true, false] {
+      let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down)
+      event?.flags = flags
+      event?.postToPid(pid)
+    }
+  }
   static func openInNewWindow(pid: pid_t, window: AXUIElement, pin: ConversationPin) async throws {
     let app = AXUIElementCreateApplication(pid)
     AXUIElementSetMessagingTimeout(app, 0.3)
-    // Prefer an exposed native menu action for the selected conversation.
     let direct: Set<String> = [
       "open in new window", "open in a new window", "open session in new window",
+      "open current session in new window",
     ]
-    if let menu = value(app, kAXMenuBarAttribute) {
-      if press(nodes(menu as! AXUIElement, maxDepth: 8, limit: 500), names: direct) { return }
+    func menu(_ labels: Set<String>) -> Bool {
+      guard let bar = value(app, kAXMenuBarAttribute) else { return false }
+      return press(nodes(bar as! AXUIElement, maxDepth: 8, limit: 600), names: labels)
     }
-    let controls = nodes(window).filter { node in
-      guard
-        ["AXLink", "AXRow", "AXButton"].contains(value(node, kAXRoleAttribute) as? String ?? "")
-      else { return false }
-      return true
+    if menu(direct) { return }
+    let shownSidebar = pin.provider == .claude && menu(["show sidebar"])
+    defer {
+      if shownSidebar {
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        _ = menu(["hide sidebar"])
+      }
+    }
+    if shownSidebar { try await Task.sleep(nanoseconds: 250_000_000) }
+    let controls = nodes(window).filter {
+      ["AXLink", "AXRow", "AXButton"].contains(value($0, kAXRoleAttribute) as? String ?? "")
     }
     let linked = controls.filter { node in
-      if let url = value(node, "AXURL"),
-        [pin.sessionID, pin.desktopSessionID].compactMap({ $0 }).contains(where: {
-          String(describing: url).contains($0)
-        })
-      {
-        return true
+      guard let url = value(node, "AXURL") else { return false }
+      return [pin.sessionID, pin.desktopSessionID].compactMap { $0 }.contains {
+        String(describing: url).contains($0)
       }
-      return false
     }
-    let candidates = linked.isEmpty ? controls.filter { name($0) == pin.title } : linked
-    guard candidates.count == 1, let row = candidates.first else {
-      throw WindowGroupError.ambiguous
-    }
-    if AXUIElementPerformAction(row, kAXShowMenuAction as CFString) != .success {
-      guard let rect = frame(row), rect.width > 0, rect.height > 0 else {
-        throw WindowGroupError.ambiguous
+    var candidates = linked.isEmpty ? controls.filter { name($0) == pin.title } : linked
+    if candidates.isEmpty, let bounds = frame(window) {
+      candidates = controls.filter { node in
+        guard let rect = frame(node), rect.minX < bounds.minX + 320, rect.height < 120 else {
+          return false
+        }
+        return name(node).hasPrefix(pin.title + " ")
       }
+    }
+    if candidates.count == 1, let row = candidates.first, let rect = frame(row),
+      rect.width > 0, rect.height > 0
+    {
       let point = CGPoint(x: rect.midX, y: rect.midY)
-      for kind in [CGEventType.rightMouseDown, .rightMouseUp] {
-        CGEvent(
-          mouseEventSource: nil, mouseType: kind, mouseCursorPosition: point, mouseButton: .right)?
-          .postToPid(pid)
+      if pin.provider == .claude {
+        // Claude's documented Command-click opens an existing session in its own window.
+        for kind in [CGEventType.leftMouseDown, .leftMouseUp] {
+          let event = CGEvent(
+            mouseEventSource: nil, mouseType: kind, mouseCursorPosition: point, mouseButton: .left)
+          event?.flags = .maskCommand
+          event?.postToPid(pid)
+        }
+        try await Task.sleep(nanoseconds: 350_000_000)
+        return
+      }
+      if AXUIElementPerformAction(row, kAXShowMenuAction as CFString) != .success {
+        for kind in [CGEventType.rightMouseDown, .rightMouseUp] {
+          CGEvent(
+            mouseEventSource: nil, mouseType: kind, mouseCursorPosition: point, mouseButton: .right)?
+            .postToPid(pid)
+        }
+      }
+      for _ in 0..<5 {
+        try await Task.sleep(nanoseconds: 100_000_000)
+        if press(nodes(app), names: direct) { return }
+        if press(nodes(app), names: ["open in", "open in…", "open in..."]) {
+          try await Task.sleep(nanoseconds: 150_000_000)
+          if press(nodes(app), names: ["new window", "open in new window"]) { return }
+        }
+      }
+      key(pid, code: 53)
+    }
+    // A collapsed sidebar may hide its row. Use only the native search palette;
+    // never type into a chat composer, and never invoke a New Session action.
+    key(pid, code: 40, flags: .maskCommand)
+    for _ in 0..<5 {
+      try await Task.sleep(nanoseconds: 150_000_000)
+      let fields = nodes(app).filter { node in
+        guard
+          ["AXComboBox", "AXTextField"].contains(value(node, kAXRoleAttribute) as? String ?? "")
+        else { return false }
+        let label = name(node) + " " + (value(node, "AXPlaceholderValue") as? String ?? "")
+        return label.lowercased().contains("search")
+      }
+      if fields.count == 1, let field = fields.first,
+        AXUIElementSetAttributeValue(
+          field, kAXValueAttribute as CFString, "Open in new window" as CFString) == .success
+      {
+        for _ in 0..<8 {
+          try await Task.sleep(nanoseconds: 150_000_000)
+          if press(nodes(app), names: direct) { return }
+        }
+        break
       }
     }
-    for _ in 0..<15 {
-      try await Task.sleep(nanoseconds: 100_000_000)
-      let tree = nodes(app)
-      if press(tree, names: direct) { return }
-      if press(tree, names: ["open in", "open in…", "open in..."]) {
-        try await Task.sleep(nanoseconds: 150_000_000)
-        if press(nodes(app), names: ["new window", "open in new window"]) { return }
-      }
-    }
+    key(pid, code: 53)
     throw WindowGroupError.unavailable(
-      "\(pin.provider.label)'s Open in New Window action is unavailable. Open this conversation in a separate window and pin it again."
+      "\(pin.provider.label)'s Open in New Window action is unavailable. No new conversation was created."
     )
   }
 
@@ -430,10 +498,19 @@ enum WindowAX {
         result["navigation"] = windows(app.processIdentifier).map { window in
           nodes(window).compactMap { node -> [String: String]? in
             let role = value(node, kAXRoleAttribute) as? String ?? ""
-            guard ["AXWebArea", "AXLink", "AXRow"].contains(role) else { return nil }
+            guard
+              [
+                "AXWebArea", "AXLink", "AXRow", "AXButton", "AXMenuItem", "AXComboBox",
+                "AXTextField",
+              ].contains(role)
+            else { return nil }
             return [
               "role": role, "name": name(node),
               "url": String(describing: value(node, "AXURL") ?? ""),
+              "identifier": String(describing: value(node, kAXIdentifierAttribute) ?? ""),
+              "domID": String(describing: value(node, "AXDOMIdentifier") ?? ""),
+              "placeholder": String(describing: value(node, "AXPlaceholderValue") ?? ""),
+              "frame": frame(node).map { NSStringFromRect($0) } ?? "",
             ]
           }
         }

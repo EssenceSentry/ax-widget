@@ -98,6 +98,9 @@ requires macOS Accessibility access for AX Widget. It uses native conversation
 navigation and Open in New Window actions; it sends no prompts, creates no
 conversations, and does not interrupt running agents. Ambiguous or unavailable
 window targets produce an error rather than selecting another conversation.
+Claude windows expose their session URL. Codex exposes a title, so AX Widget
+checks that its native history maps that title to exactly one conversation;
+duplicate titles must be renamed before pinning.
 Use ordinary desktop windows on one display; leave full screen before arranging.
 
 ## Notification Center and desktop widget
