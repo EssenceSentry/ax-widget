@@ -126,18 +126,23 @@ public struct LocalRepository {
         }
       }
     }
-    let candidates = found.values.filter { !excluded.contains($0.id) }
-      .sorted {
-        let a = progress[$0.id] != nil
-        let b = progress[$1.id] != nil
-        return a == b ? $0.updated > $1.updated : a
-      }.prefix(24)
+    // Filter SDK workers before limiting candidates: many recent worker sessions
+    // must not crowd older, real conversations out of the widget.
+    let candidates = found.values.filter { item in
+      guard !excluded.contains(item.id) else { return false }
+      return item.source.map { TranscriptReader.isMainConversation(URL(fileURLWithPath: $0)) }
+        ?? true
+    }
+    .sorted {
+      let a = progress[$0.id] != nil
+      let b = progress[$1.id] != nil
+      return a == b ? $0.updated > $1.updated : a
+    }.prefix(24)
     var items: [Conversation] = []
     for var item in candidates {
       item.progress = progress[item.id]
       if let source = item.source {
         do {
-          if !TranscriptReader.isMainConversation(URL(fileURLWithPath: source)) { continue }
           let update = try TranscriptReader.read(URL(fileURLWithPath: source))
           item.latestUpdate = update.text
           item.updateAt = update.date

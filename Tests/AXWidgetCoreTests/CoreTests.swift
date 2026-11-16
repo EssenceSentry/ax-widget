@@ -212,6 +212,23 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
   ]
   try JSONSerialization.data(withJSONObject: record).write(
     to: records.appendingPathComponent(nativeID + ".json"))
+  // A burst of newer SDK workers cannot displace the interactive Desktop chat.
+  try FileManager.default.createDirectory(at: paths.axData, withIntermediateDirectories: true)
+  var writer: OpaquePointer?
+  sqlite3_open(paths.axData.appendingPathComponent("catalog.sqlite3").path, &writer)
+  sqlite3_exec(
+    writer,
+    "CREATE TABLE conversations(provider TEXT,id TEXT,title TEXT,project TEXT,source TEXT,updated REAL,mtime REAL)",
+    nil, nil, nil)
+  for index in 0..<30 {
+    let worker = home.appendingPathComponent("worker-\(index).jsonl")
+    try #"{"type":"user","entrypoint":"sdk-cli","isSidechain":false}"#.write(
+      to: worker, atomically: true, encoding: .utf8)
+    let sql =
+      "INSERT INTO conversations VALUES('claude','\(UUID().uuidString)','Worker','','\(worker.path)',1800000001,1800000001)"
+    sqlite3_exec(writer, sql, nil, nil, nil)
+  }
+  sqlite3_close(writer)
   let result = LocalRepository(paths: paths).conversations()
   #expect(result.items.count == 1)
   #expect(result.items.first?.title == "Integration review")
