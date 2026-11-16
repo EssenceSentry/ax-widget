@@ -80,17 +80,46 @@ public enum WindowGroupError: LocalizedError {
 public enum ConversationWindowLayout {
   /// Coordinates are in the Accessibility global, top-left coordinate system.
   public static func frames(count: Int, visible: CGRect, gap: CGFloat = 10) throws -> [CGRect] {
-    guard (1...3).contains(count), visible.width.isFinite, visible.height.isFinite,
+    guard (1...3).contains(count) else { throw WindowGroupError.cannotFit }
+    return try frames(
+      minimumWidths: Array(repeating: 320, count: count), visible: visible, gap: gap)
+  }
+  public static func frames(
+    minimumWidths: [CGFloat], visible: CGRect,
+    gap: CGFloat = 10, padding: CGFloat = 10
+  ) throws -> [CGRect] {
+    guard (1...3).contains(minimumWidths.count), visible.width.isFinite, visible.height.isFinite,
       visible.minX.isFinite, visible.minY.isFinite, gap.isFinite, gap >= 0,
-      visible.width > 0, visible.height > 0
+      padding.isFinite, padding >= 0,
+      minimumWidths.allSatisfy({ $0.isFinite && $0 >= 320 })
     else { throw WindowGroupError.cannotFit }
-    let inset = visible.insetBy(dx: 10, dy: 10)
-    let width = floor((inset.width - CGFloat(count - 1) * gap) / CGFloat(count))
-    guard width >= 320, inset.height >= 300 else { throw WindowGroupError.cannotFit }
-    return (0..<count).map { index in
-      CGRect(
-        x: inset.minX + CGFloat(index) * (width + gap), y: inset.minY,
-        width: width, height: inset.height)
+    let inset = visible.insetBy(dx: padding, dy: padding)
+    let minimums = minimumWidths.map(ceil)
+    let available = inset.width - CGFloat(minimums.count - 1) * gap
+    guard inset.height >= 300, available >= minimums.reduce(0, +) else {
+      throw WindowGroupError.cannotFit
+    }
+    var widths = Array(repeating: CGFloat.zero, count: minimums.count)
+    var active = Set(widths.indices)
+    var remaining = available
+    while !active.isEmpty {
+      let share = remaining / CGFloat(active.count)
+      let constrained = active.filter { minimums[$0] > share }
+      if constrained.isEmpty {
+        for index in active { widths[index] = floor(share) }
+        break
+      }
+      for index in constrained {
+        widths[index] = minimums[index]
+        remaining -= minimums[index]
+        active.remove(index)
+      }
+    }
+    widths[widths.count - 1] += available - widths.reduce(0, +)
+    var x = inset.minX
+    return widths.map { width in
+      defer { x += width + gap }
+      return CGRect(x: x, y: inset.minY, width: width, height: inset.height)
     }
   }
   public static func accessibilityRect(_ rect: CGRect, primaryTop: CGFloat) -> CGRect {

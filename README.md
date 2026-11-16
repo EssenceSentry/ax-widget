@@ -76,7 +76,9 @@ are included. There is no brand/count header and no built-in chat editor.
 
 Pin up to three conversations using the pin beside each title. Each pin opens
 that exact conversation in its own native Claude or Codex window and arranges the
-group side by side on the widget's display. The separate toolbar pin still means
+group side by side on the widget's display. Claude uses its compact, sidebar-free
+conversation pop-outs. Codex uses separate native windows with the conversation
+sidebar collapsed (its slim navigation rail remains). The separate toolbar pin still means
 **Keep floating**; it does not pin a conversation.
 
 - **Show group** (overlapping rectangles) restores and raises all pinned windows
@@ -89,6 +91,7 @@ group side by side on the widget's display. The separate toolbar pin still means
   menu. Normal Show group preserves any positions and sizes you adjust manually.
   Pin changes arrange the group again. If the apps' minimum window sizes do not
   fit, the previous frames are restored and the panel explains the problem.
+  Layout adapts to different native minimum widths instead of assuming equal minima.
 - Unpinning leaves the conversation open and removes it from group control.
   Pin references survive widget restarts; restoring them never launches provider
   apps until you request Show group. No chat contents are stored in preferences.
@@ -98,9 +101,10 @@ requires macOS Accessibility access for AX Widget. It uses native conversation
 navigation and Open in New Window actions; it sends no prompts, creates no
 conversations, and does not interrupt running agents. Ambiguous or unavailable
 window targets produce an error rather than selecting another conversation.
-Claude windows expose their session URL. Codex exposes a title, so AX Widget
-checks that its native history maps that title to exactly one conversation;
-duplicate titles must be renamed before pinning.
+Claude's main window exposes its session URL; its compact pop-outs expose a native
+title and return-to-main-window control. Codex also exposes a native title. AX Widget
+checks titles against the corresponding provider's local registration/history and
+accepts only unique matches; duplicate titles must be renamed before pinning.
 Use ordinary desktop windows on one display; leave full screen before arranging.
 
 ## Notification Center and desktop widget

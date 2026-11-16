@@ -185,7 +185,7 @@ public struct LocalRepository {
     return (group.ordered(items, limit: limit), issues)
   }
 
-  private func desktopRecords() -> [[String: Any]] {
+  func desktopRecords() -> [[String: Any]] {
     let manager = FileManager.default
     var rows: [[String: Any]] = []
     guard

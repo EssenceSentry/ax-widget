@@ -165,7 +165,7 @@ import Foundation
           do {
             try await conversationWindows.show(
               group.pins, screen: floating.groupScreen,
-              arrange: true, newlyPinnedID: conversation.id)
+              arrange: true)
             store.setGroup(group)
             store.reportGroupError(nil)
             floating.collapse()
@@ -180,7 +180,7 @@ import Foundation
     }
   }
 
-  private func showConversationGroup(arrange: Bool = false, newlyPinnedID: String? = nil) {
+  private func showConversationGroup(arrange: Bool = false) {
     guard !store.demo, !groupOperation else { return }
     groupOperation = true
     Task {
@@ -188,7 +188,7 @@ import Foundation
       do {
         try await conversationWindows.show(
           store.group.pins, screen: floating.groupScreen,
-          arrange: arrange, newlyPinnedID: newlyPinnedID)
+          arrange: arrange)
         store.reportGroupError(nil)
         floating.collapse()
       } catch {
@@ -378,7 +378,8 @@ import Foundation
             provider: .codex, sessionID: String(parts[1]),
             title: title, updated: .distantPast))
       }
-      let recent = LocalRepository().conversations(limit: 40, pins: retained).items
+      let recent = LocalRepository().conversations(limit: 40, at: .distantPast, pins: retained)
+        .items
       let pins = ids.compactMap { id in recent.first { $0.id == id }.map(ConversationPin.init) }
       guard !pins.isEmpty, pins.count == ids.count, pins.count <= 3,
         Set(ids).count == ids.count
@@ -393,7 +394,10 @@ import Foundation
         let client = ConversationWindows(persist: false)
         var report: [String: Any]
         do { report = try await client.verify(pins) } catch {
-          report = ["error": error.localizedDescription]
+          report = [
+            "error": error.localizedDescription, "navigation": WindowAX.lastNavigation,
+            "layout": WindowAX.lastLayout,
+          ]
         }
         if let data = try? JSONSerialization.data(withJSONObject: report) {
           FileHandle.standardOutput.write(data)

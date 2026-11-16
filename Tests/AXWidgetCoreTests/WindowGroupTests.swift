@@ -110,6 +110,21 @@ private func chat(_ index: Int, date: Date = Date()) -> Conversation {
   #expect(old.pinnedConversationIDs == nil)
 }
 
+@Test func unevenNativeMinimumWidthsFitWithoutOverlapping() throws {
+  let display = CGRect(x: 0, y: 33, width: 1512, height: 949)
+  let three = try ConversationWindowLayout.frames(
+    minimumWidths: [480, 500, 480], visible: display, gap: 6, padding: 6)
+  #expect(three.map(\.width) == [494, 500, 494])
+  #expect(three.allSatisfy(display.contains))
+  #expect(three[0].maxX + 6 == three[1].minX && three[1].maxX + 6 == three[2].minX)
+  let two = try ConversationWindowLayout.frames(minimumWidths: [480, 800], visible: display)
+  #expect(two.map(\.width) == [682, 800])
+  #expect(throws: WindowGroupError.self) {
+    try ConversationWindowLayout.frames(
+      minimumWidths: [480, 800, 480], visible: display, gap: 6, padding: 6)
+  }
+}
+
 @Test func codexWindowTitlesRequireUniqueCurrentNativeSessionMapping() throws {
   let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -134,4 +149,25 @@ private func chat(_ index: Int, date: Date = Date()) -> Conversation {
   #expect(CodexWindowIdentity.title(sessionID: second, home: home) == nil)
   #expect(CodexWindowIdentity.title(sessionID: chat(3).sessionID, home: home) == nil)
   #expect(CodexWindowIdentity.title(sessionID: "invalid", home: home) == nil)
+}
+
+@Test func claudePopoutTitlesRequireUniqueRegisteredDesktopSession() throws {
+  let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  let paths = LocalPaths(home: home)
+  let folder = paths.claudeDesktop.appendingPathComponent("account/org")
+  try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: home) }
+  func write(_ id: String, title: String) throws {
+    let data = try JSONSerialization.data(withJSONObject: ["sessionId": id, "title": title])
+    try data.write(to: folder.appendingPathComponent(id + ".json"))
+  }
+  try write("local_first", title: "First")
+  try write("local_second", title: "Second")
+  #expect(ClaudeWindowIdentity.title(desktopSessionID: "local_first", paths: paths) == "First")
+  try write("local_first", title: "Renamed")
+  #expect(ClaudeWindowIdentity.title(desktopSessionID: "local_first", paths: paths) == "Renamed")
+  try write("local_second", title: "Renamed")
+  #expect(ClaudeWindowIdentity.title(desktopSessionID: "local_first", paths: paths) == nil)
+  #expect(ClaudeWindowIdentity.title(desktopSessionID: "local_missing", paths: paths) == nil)
+  #expect(ClaudeWindowIdentity.title(desktopSessionID: "../../invalid", paths: paths) == nil)
 }
