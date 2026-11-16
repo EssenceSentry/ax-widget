@@ -113,13 +113,14 @@ public struct LocalRepository {
         {
           found[owner]?.updated = activity
         }
-        if progress[owner] != nil {
-          progress[owner]?.runningCount += 1
-          continue
-        }
-        progress[owner] = TaskProgress(
+        let job = TaskProgress(
           done: row["done"] as? Double, total: row["total"] as? Double,
           unit: row["unit"] as? String, stage: row["stage"] as? String, runningCount: 1)
+        if progress[owner] != nil {
+          progress[owner]?.include(job)
+        } else {
+          progress[owner] = job
+        }
       }
     } catch { issues.append("ax tasks: \(error.localizedDescription)") }
 

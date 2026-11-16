@@ -37,7 +37,8 @@ are included. There is no brand/count header and no built-in chat editor.
 - Numeric progress comes from ax tasks. Reaching a task total does not imply
   that the conversation is complete.
 - Each conversation has a separate numbered badge for its active ax jobs, even
-  while a numeric progress counter is visible.
+  while a numeric progress counter is visible. If any active job has numeric
+  progress, the most recent such counter stays visible alongside the total job count.
 - **New Codex** and **New Claude** open a native new-chat composer using the most
   recent working folder for that provider. Opening the composer sends no prompt.
 - A blue provider dot marks a pending question, in the floating pill and the

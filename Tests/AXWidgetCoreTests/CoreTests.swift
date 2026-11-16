@@ -127,6 +127,22 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
   #expect(snapshot.claudeWeekly?.remaining(at: now) == 41)
 }
 
+@Test func activeJobCountDoesNotHideAnotherJobsNumericProgress() {
+  let numeric = TaskProgress(done: 1, total: 3, unit: "checks", stage: "Checking", runningCount: 1)
+  let indeterminate = TaskProgress(runningCount: 1)
+  for (newer, older) in [(numeric, indeterminate), (indeterminate, numeric)] {
+    var summary = newer
+    summary.include(older)
+    #expect(summary.runningCount == 2)
+    #expect(summary.done == 1 && summary.total == 3 && summary.unit == "checks")
+    #expect(summary.stage == "Checking")
+  }
+  var summary = numeric
+  summary.include(TaskProgress(done: 8, total: 9, stage: "Older progress", runningCount: 1))
+  #expect(summary.runningCount == 2)
+  #expect(summary.done == 1 && summary.total == 3)
+}
+
 @Test func indeterminateProgressIsNotZeroOrComplete() {
   #expect(TaskProgress().fraction == nil)
   #expect(TaskProgress(done: 6, total: 9).fraction == 2.0 / 3.0)

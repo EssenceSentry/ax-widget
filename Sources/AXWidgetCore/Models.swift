@@ -83,6 +83,14 @@ public struct TaskProgress: Codable, Equatable, Sendable {
     }
     return min(1, done / total)
   }
+
+  /// Rows arrive newest first. Keep the most recent numeric progress, while
+  /// counting every active job even when the newest job has no counter.
+  public mutating func include(_ job: TaskProgress) {
+    let count = runningCount + job.runningCount
+    if fraction == nil && job.fraction != nil { self = job }
+    runningCount = count
+  }
 }
 
 public struct Conversation: Codable, Identifiable, Equatable, Sendable {
