@@ -20,7 +20,7 @@ are included. There is no brand/count header and no built-in chat editor.
   invented summary. More expands the text in place.
 - Numeric progress comes from ax tasks. Reaching a task total does not imply
   that the conversation is complete.
-- Unknown, stale, or expired usage shows an empty dashed track and an em dash.
+- Unknown, stale, or expired usage shows a neutral continuous track and an em dash.
 - The menu-bar item controls floating visibility, appearance, refresh, and quit.
 
 ## Notification Center and desktop widgets

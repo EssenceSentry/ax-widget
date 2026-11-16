@@ -6,7 +6,7 @@ mkdir -p dist
 if /usr/bin/xcodebuild -version >/dev/null 2>&1 && command -v xcodegen >/dev/null 2>&1; then
     xcodegen generate
     xcodebuild -project AXWidget.xcodeproj -scheme AXWidget -configuration "$configuration" \
-        -derivedDataPath build/xcode -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO build
+        -derivedDataPath build/xcode -destination 'platform=macOS' ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
     source_app="build/xcode/Build/Products/$configuration/AXWidget.app"
     ditto "$source_app" 'dist/AX Widget.app'
     codesign --force --sign - --entitlements Config/Widget.entitlements \
