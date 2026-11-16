@@ -20,17 +20,20 @@ private final class ExpansionState: ObservableObject {
 public struct ConversationsView: View {
   public var snapshot: Snapshot
   public var compact: Bool
+  public var staticPreview: Bool
   public var open: ((Conversation) -> Void)?
   public var answer: QuestionAnswerHandler?
   @Environment(\.colorScheme) private var scheme
   @StateObject private var presentation = ExpansionState()
 
   public init(
-    snapshot: Snapshot, compact: Bool = false, open: ((Conversation) -> Void)? = nil,
+    snapshot: Snapshot, compact: Bool = false, staticPreview: Bool = false,
+    open: ((Conversation) -> Void)? = nil,
     answer: QuestionAnswerHandler? = nil
   ) {
     self.snapshot = snapshot
     self.compact = compact
+    self.staticPreview = staticPreview
     self.open = open
     self.answer = answer
   }
@@ -123,7 +126,7 @@ public struct ConversationsView: View {
       if let groups = conversation.questions, !groups.isEmpty {
         QuestionForm(
           conversation: conversation, groups: groups, palette: palette,
-          answer: snapshot.isDemo ? nil : answer, open: open, preview: snapshot.isDemo)
+          answer: snapshot.isDemo ? nil : answer, open: open, preview: staticPreview)
       }
       if !compact,
         presentation.expanded.contains(conversation.id) || presentation.overflows(conversation.id)
@@ -287,7 +290,8 @@ public struct PanelContent: View {
             }
         }.scrollIndicators(.hidden)
       } else {
-        ConversationsView(snapshot: snapshot, open: open, answer: answer).padding(.horizontal, 18)
+        ConversationsView(snapshot: snapshot, staticPreview: true, open: open, answer: answer)
+          .padding(.horizontal, 18)
           .padding(.top, 10)
           .padding(.bottom, 17)
         Spacer(minLength: 0)

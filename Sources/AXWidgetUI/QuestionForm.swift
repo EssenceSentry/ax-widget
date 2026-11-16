@@ -68,11 +68,16 @@ struct QuestionForm: View {
           }
         }
         HStack(spacing: 10) {
-          if preview {
+          let ready = target.group.questions.allSatisfy {
+            answers(for: target.group)[$0.id]?.isEmpty == false
+          }
+          if preview && ready {
             Text("Send answer").font(.system(size: 11, weight: .medium))
               .foregroundStyle(palette.secondary).padding(.horizontal, 10).padding(.vertical, 5)
               .background(palette.track, in: RoundedRectangle(cornerRadius: 5))
-          } else {
+          } else if !preview
+            && (ready || draft.sending || draft.submitted.contains(target.group.id))
+          {
             Button(
               draft.sending
                 ? "Sending…"
@@ -84,9 +89,7 @@ struct QuestionForm: View {
             }.buttonStyle(.borderedProminent).controlSize(.small)
               .disabled(
                 answer == nil || draft.sending || draft.submitted.contains(target.group.id)
-                  || target.group.questions.contains {
-                    answers(for: target.group)[$0.id]?.isEmpty != false
-                  }
+                  || !ready
               )
               .help(
                 target.group.questions.count > 1
@@ -114,6 +117,7 @@ struct QuestionForm: View {
         let option = question.options[index]
         let selected = draft.choices[key, default: []].contains(option.label)
         Button {
+          draft.words.removeValue(forKey: key)
           if question.multiple {
             if selected {
               draft.choices[key, default: []].remove(option.label)
@@ -146,7 +150,11 @@ struct QuestionForm: View {
       }
       if question.allowsText || question.options.isEmpty {
         let binding = Binding<String>(
-          get: { draft.words[key] ?? "" }, set: { draft.words[key] = $0 })
+          get: { draft.words[key] ?? "" },
+          set: {
+            draft.choices.removeValue(forKey: key)
+            draft.words[key] = $0
+          })
         if preview {
           Text(question.options.isEmpty ? "Your answer" : "Or type an answer")
             .font(.system(size: 12)).foregroundStyle(palette.secondary)
@@ -155,12 +163,17 @@ struct QuestionForm: View {
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(palette.separator, lineWidth: 0.6))
         } else if question.secret {
           SecureField("Your answer", text: binding).textFieldStyle(.roundedBorder)
+            .simultaneousGesture(TapGesture().onEnded { draft.choices.removeValue(forKey: key) })
         } else {
-          TextField(question.options.isEmpty ? "Your answer" : "Or type an answer", text: binding)
-            .textFieldStyle(.roundedBorder)
+          TextField(question.options.isEmpty ? "Your answer" : "Or type an answer", text: binding) {
+            editing in
+            if editing { draft.choices.removeValue(forKey: key) }
+          }
+          .textFieldStyle(.roundedBorder)
+          .simultaneousGesture(TapGesture().onEnded { draft.choices.removeValue(forKey: key) })
         }
       }
-    }
+    }.id(key)
   }
 
   private func answers(for group: AgentQuestionGroup) -> [String: [String]] {

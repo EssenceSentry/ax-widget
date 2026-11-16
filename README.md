@@ -45,6 +45,8 @@ are included. There is no brand/count header and no built-in chat editor.
   submits the selected response to that same
   conversation; its pending indicator clears when the native transcript records it.
   When an agent asks several questions together, fill them in and use **Send answers**.
+  Clicking the text field clears the selected choices. The send button appears
+  only once the required answers have a selection or nonempty text.
 - Claude inline answers require macOS Accessibility permission, because the
   installed client handles question submission inside its renderer. AX Widget
   matches the original question and submit control; ambiguous forms stay unanswered.
