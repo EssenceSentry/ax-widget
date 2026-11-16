@@ -59,6 +59,8 @@ import Foundation
     if !urls.isEmpty { application(NSApp, open: urls) }
   }
 
+  func applicationWillTerminate(_ notification: Notification) { conversationWindows.remember() }
+
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
     let toggle = menu.addItem(
@@ -388,7 +390,7 @@ import Foundation
       let app = NSApplication.shared
       app.setActivationPolicy(.accessory)
       Task {
-        let client = ConversationWindows()
+        let client = ConversationWindows(persist: false)
         var report: [String: Any]
         do { report = try await client.verify(pins) } catch {
           report = ["error": error.localizedDescription]

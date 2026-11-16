@@ -9,8 +9,6 @@ if /usr/bin/xcodebuild -version >/dev/null 2>&1 && command -v xcodegen >/dev/nul
         -derivedDataPath build/xcode -destination 'platform=macOS' ARCHS='arm64 x86_64' ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO build
     source_app="build/xcode/Build/Products/$configuration/AXWidget.app"
     ditto "$source_app" 'dist/AX Widget.app'
-    codesign --force --sign - --entitlements Config/Widget.entitlements \
-        'dist/AX Widget.app/Contents/PlugIns/AXWidgetExtension.appex'
 else
     echo 'Building floating app with Command Line Tools. System widgets require the Xcode build.'
     swift build -c "$(printf '%s' "$configuration" | tr '[:upper:]' '[:lower:]')" --jobs 2 --product AXWidget
@@ -22,8 +20,7 @@ else
         if [[ -d "$resource" ]]; then ditto "$resource" "dist/AX Widget.app/Contents/Resources/$(basename "$resource")"; fi
     done
 fi
-codesign --force --sign - --options runtime 'dist/AX Widget.app'
-codesign --verify --deep --strict 'dist/AX Widget.app'
+scripts/sign.sh 'dist/AX Widget.app'
 if [[ -d 'dist/AX Widget.app/Contents/PlugIns/AXWidgetExtension.appex' ]]; then
     python3 scripts/verify-bundle.py 'dist/AX Widget.app'
 fi

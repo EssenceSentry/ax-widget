@@ -11,6 +11,45 @@ import ApplicationServices
   }
   private var bindings: [String: Binding] = [:]
   private var busy = false
+  private struct Bookmark: Codable {
+    var x: Double
+    var y: Double
+    var width: Double
+    var height: Double
+    init(_ rect: CGRect) {
+      x = rect.minX
+      y = rect.minY
+      width = rect.width
+      height = rect.height
+    }
+    func matches(_ rect: CGRect?) -> Bool {
+      guard let rect else { return false }
+      return abs(x - rect.minX) < 3 && abs(y - rect.minY) < 3
+        && abs(width - rect.width) < 3 && abs(height - rect.height) < 3
+    }
+  }
+  private var bookmarks: [String: Bookmark] = [:]
+  private let persist: Bool
+  init(persist: Bool = true) {
+    self.persist = persist
+    if persist, let data = UserDefaults.standard.data(forKey: "conversationWindowFrames") {
+      bookmarks = (try? JSONDecoder().decode([String: Bookmark].self, from: data)) ?? [:]
+    }
+  }
+  func remember() {
+    for (id, binding) in bindings {
+      if let frame = WindowAX.frame(binding.window) { bookmarks[id] = Bookmark(frame) }
+    }
+    if persist, let data = try? JSONEncoder().encode(bookmarks) {
+      UserDefaults.standard.set(data, forKey: "conversationWindowFrames")
+    }
+  }
+  private func existing(_ pin: ConversationPin, pid: pid_t) -> AXUIElement? {
+    let matching = WindowAX.windows(pid).filter { WindowAX.matches($0, pin: pin) }
+    if matching.count == 1 { return matching.first }
+    let recorded = matching.filter { bookmarks[pin.id]?.matches(WindowAX.frame($0)) == true }
+    return recorded.count == 1 ? recorded.first : nil
+  }
 
   /// Explicit developer acceptance check; never runs during background refresh.
   /// Restores pre-existing window frames and minimizes states, and closes only pop-outs it creates.
@@ -67,16 +106,28 @@ import ApplicationServices
       WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool == false && valid($0)
     }
     let preserved = zip(windows, frames).allSatisfy { WindowAX.frame($0.0.window) == $0.1 }
+    let restarted = ConversationWindows(persist: false)
+    restarted.bookmarks = bookmarks
+    try await restarted.show(pins, screen: NSScreen.main)
+    let reused = pins.allSatisfy { pin in
+      guard let old = bindings[pin.id], let new = restarted.bindings[pin.id] else { return false }
+      return CFEqual(old.window, new.window)
+    }
     let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
     return [
       "count": pins.count, "identitiesVerified": windows.allSatisfy(valid),
       "minimizedTogether": minimized, "switchedAway": switchedAway,
       "restoredTogether": visible, "manualFramesPreserved": preserved,
       "providerForeground": pins.contains { $0.provider.bundleIdentifier == frontmost },
+      "reusedAfterWidgetRestart": reused,
     ]
   }
 
-  func forget(_ id: String) { bindings.removeValue(forKey: id) }
+  func forget(_ id: String) {
+    bindings.removeValue(forKey: id)
+    bookmarks.removeValue(forKey: id)
+    remember()
+  }
 
   func show(
     _ pins: [ConversationPin], screen: NSScreen?, arrange: Bool = false,
@@ -104,6 +155,7 @@ import ApplicationServices
     if arrange || opened {
       try tile(windows, screen: screen ?? NSScreen.main)
     }
+    remember()
   }
 
   func minimize(_ pins: [ConversationPin]) throws {
@@ -115,10 +167,7 @@ import ApplicationServices
           withBundleIdentifier: pin.provider.bundleIdentifier
         ).first
       {
-        let matching = WindowAX.windows(app.processIdentifier).filter {
-          WindowAX.matches($0, pin: pin)
-        }
-        if matching.count == 1, let window = matching.first {
+        if let window = existing(pin, pid: app.processIdentifier) {
           bindings[pin.id] = Binding(pin: pin, pid: app.processIdentifier, window: window)
         }
       }
@@ -128,6 +177,7 @@ import ApplicationServices
     let states = windows.map {
       (WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool) ?? false
     }
+    remember()
     for (index, binding) in windows.enumerated() {
       if AXUIElementSetAttributeValue(
         binding.window, kAXMinimizedAttribute as CFString, kCFBooleanTrue) != .success
@@ -204,13 +254,14 @@ import ApplicationServices
         withBundleIdentifier: pin.provider.bundleIdentifier
       ).first
     {
-      let matches = WindowAX.windows(running.processIdentifier).filter {
-        WindowAX.matches($0, pin: pin)
-      }
-      if matches.count == 1, let window = matches.first {
+      if let window = existing(pin, pid: running.processIdentifier) {
         return (Binding(pin: pin, pid: running.processIdentifier, window: window), false)
       }
-      if matches.count > 1 { throw WindowGroupError.ambiguous }
+      if WindowAX.windows(running.processIdentifier).filter({ WindowAX.matches($0, pin: pin) })
+        .count > 1
+      {
+        throw WindowGroupError.ambiguous
+      }
     }
     guard let url = pin.conversation.deepLink,
       let appURL = NSWorkspace.shared.urlForApplication(
@@ -221,6 +272,44 @@ import ApplicationServices
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = true
+    if pin.provider == .codex {
+      let running = try await NSWorkspace.shared.openApplication(
+        at: appURL, configuration: configuration)
+      let pid = running.processIdentifier
+      let before = WindowAX.windows(pid)
+      try WindowAX.newCodexWindow(pid)
+      let deadline = Date().addingTimeInterval(10)
+      var newWindow: AXUIElement?
+      while Date() < deadline {
+        let created = WindowAX.windows(pid).filter { window in
+          !before.contains { CFEqual($0, window) }
+        }
+        if created.count == 1 {
+          newWindow = created.first
+          break
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+      }
+      guard let newWindow else {
+        throw WindowGroupError.unavailable("Codex could not create a new window.")
+      }
+      AXUIElementPerformAction(newWindow, kAXRaiseAction as CFString)
+      AXUIElementSetAttributeValue(newWindow, kAXMainAttribute as CFString, kCFBooleanTrue)
+      try await Task.sleep(nanoseconds: 200_000_000)
+      let navigation = NSWorkspace.OpenConfiguration()
+      navigation.activates = false
+      _ = try await NSWorkspace.shared.open(
+        [url], withApplicationAt: appURL, configuration: navigation)
+      let navigationDeadline = Date().addingTimeInterval(10)
+      while Date() < navigationDeadline {
+        if WindowAX.matches(newWindow, pin: pin) {
+          return (Binding(pin: pin, pid: pid, window: newWindow), true)
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+      }
+      throw WindowGroupError.unavailable(
+        "Codex opened a window but did not show the requested conversation.")
+    }
     let running: NSRunningApplication = try await withCheckedThrowingContinuation { continuation in
       NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: configuration) {
         app, error in
@@ -277,9 +366,12 @@ enum WindowAX {
   static func windows(_ pid: pid_t) -> [AXUIElement] {
     let app = AXUIElementCreateApplication(pid)
     AXUIElementSetMessagingTimeout(app, 0.3)
+    // Electron documents this opt-in for native assistive clients. It exposes
+    // the renderer tree without enabling VoiceOver or changing system settings.
+    AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     return value(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
   }
-  static func nodes(_ element: AXUIElement, maxDepth: Int = 24, limit: Int = 2400) -> [AXUIElement]
+  static func nodes(_ element: AXUIElement, maxDepth: Int = 56, limit: Int = 6000) -> [AXUIElement]
   {
     let deadline = Date().addingTimeInterval(2)
     var result: [AXUIElement] = []
@@ -362,6 +454,20 @@ enum WindowAX {
     return matches.count == 1
       && AXUIElementPerformAction(matches[0], kAXPressAction as CFString) == .success
   }
+  static func newCodexWindow(_ pid: pid_t) throws {
+    let app = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(app, 0.3)
+    guard let raw = value(app, kAXMenuBarAttribute) else { throw WindowGroupError.ambiguous }
+    let bar = raw as! AXUIElement
+    let files = (value(bar, kAXChildrenAttribute) as? [AXUIElement] ?? []).filter {
+      name($0) == "File"
+    }
+    guard files.count == 1, let file = files.first,
+      press(nodes(file, maxDepth: 8, limit: 200), names: ["new window"])
+    else {
+      throw WindowGroupError.unavailable("Codex's File → New Window action is unavailable.")
+    }
+  }
   private static func searchPaletteScope(_ field: AXUIElement) -> AXUIElement? {
     var current = field
     for _ in 0..<6 {
@@ -398,16 +504,29 @@ enum WindowAX {
       return press(nodes(bar as! AXUIElement, maxDepth: 8, limit: 600), names: labels)
     }
     if menu(direct) { return }
-    let shownSidebar = pin.provider == .claude && menu(["show sidebar"])
+    let bounds = frame(window)
+    let header = nodes(window).filter { node in
+      guard let bounds, let rect = frame(node) else { return false }
+      return rect.minY < bounds.minY + 65 && rect.height <= 40
+    }
+    let shownSidebar =
+      press(header, names: ["show sidebar"], roles: ["AXButton"])
+      || menu(["show sidebar"])
     defer {
       if shownSidebar {
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-        _ = menu(["hide sidebar"])
+        if !press(
+          nodes(window).filter { node in
+            guard let bounds, let rect = frame(node) else { return false }
+            return rect.minY < bounds.minY + 65 && rect.height <= 40
+          }, names: ["hide sidebar"], roles: ["AXButton"])
+        {
+          _ = menu(["hide sidebar"])
+        }
       }
     }
     if shownSidebar { try await Task.sleep(nanoseconds: 250_000_000) }
-    let bounds = frame(window)
     let controls = nodes(window).filter { node in
       guard
         ["AXLink", "AXRow", "AXButton"].contains(value(node, kAXRoleAttribute) as? String ?? ""),
@@ -437,14 +556,22 @@ enum WindowAX {
     {
       let point = CGPoint(x: rect.midX, y: rect.midY)
       if pin.provider == .claude {
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+          throw WindowGroupError.unavailable(
+            "Bring Claude to the front before opening its conversation window.")
+        }
+        let cursor = CGEvent(source: nil)?.location
         // Claude's documented Command-click opens an existing session in its own window.
         for kind in [CGEventType.leftMouseDown, .leftMouseUp] {
           let event = CGEvent(
             mouseEventSource: nil, mouseType: kind, mouseCursorPosition: point, mouseButton: .left)
           event?.flags = .maskCommand
-          event?.postToPid(pid)
+          event?.post(tap: .cghidEventTap)
         }
         try await Task.sleep(nanoseconds: 350_000_000)
+        if let cursor { CGWarpMouseCursorPosition(cursor) }
         return
       }
       if AXUIElementPerformAction(row, kAXShowMenuAction as CFString) != .success {

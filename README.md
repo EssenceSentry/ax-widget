@@ -152,6 +152,16 @@ With full Xcode and XcodeGen it builds and embeds the real widget extension.
 The macOS CI workflow builds both and uploads an ad-hoc-signed app ZIP. This is a
 local developer build, not a notarized public release.
 
+For local development, a persistent **AX Widget Local Signing** certificate in
+the login Keychain lets successive builds keep the same signing identity.
+`scripts/setup-local-signing.py` prints the proposed Keychain changes without
+making them; `--install` creates the identity after explicit approval. The
+certificate is trusted only for code signing on this Mac, with no Apple account
+or cloud copy of its private key. Builds and installations automatically reuse
+it; `AX_WIDGET_SIGNING_IDENTITY` can select another identity. CI uses ad-hoc
+signing. Moving from ad-hoc signing to the certificate requires a fresh
+Accessibility grant; later updates retain the same designated requirement.
+
 For design inspection without live histories:
 
 ```sh

@@ -3,6 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source_app="${1:-dist/AX Widget.app}"
 if [[ ! -d "$source_app" ]]; then echo "Build the app first: scripts/build.sh" >&2; exit 1; fi
+scripts/sign.sh "$source_app"
 destination="$HOME/Applications/AX Widget.app"
 mkdir -p "$HOME/Applications"
 if [[ -d "$destination" ]]; then
