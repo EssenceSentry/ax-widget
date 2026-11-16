@@ -72,6 +72,12 @@ import Foundation
       withTitle: "Add Usage Widget…", action: #selector(showWidgetHelp),
       keyEquivalent: "")
     widgets.target = self
+    if !ClaudeQuestionClient.isTrusted {
+      let replies = menu.addItem(
+        withTitle: "Enable Claude replies…", action: #selector(enableClaudeReplies),
+        keyEquivalent: "")
+      replies.target = self
+    }
     let refresh = menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r")
     refresh.target = self
     menu.addItem(.separator())
@@ -102,6 +108,13 @@ import Foundation
     }
   }
   @objc private func refresh() { store.refresh(forceUsage: true) }
+  @objc private func enableClaudeReplies() {
+    guard !ClaudeQuestionClient.requestAccessibility(),
+      let settings = URL(
+        string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+    else { return }
+    NSWorkspace.shared.open(settings)
+  }
   @objc private func quit() { NSApp.terminate(nil) }
   @objc private func showWidgetHelp() {
     let alert = NSAlert()
@@ -221,6 +234,10 @@ import Foundation
         floating?.expand()
         continue
       }
+      if url.host == "accessibility" {
+        enableClaudeReplies()
+        continue
+      }
       let parts = url.pathComponents.filter { $0 != "/" }
       guard url.host == "conversation", parts.count == 2, UUID(uuidString: parts[1]) != nil,
         let provider = Provider(rawValue: parts[0])
@@ -237,6 +254,13 @@ import Foundation
 
 @main enum Main {
   @MainActor static func main() {
+    if CommandLine.arguments.contains("--accessibility-status") {
+      let data = try? JSONSerialization.data(withJSONObject: [
+        "accessibilityTrusted": ClaudeQuestionClient.isTrusted
+      ])
+      if let data { FileHandle.standardOutput.write(data) }
+      return
+    }
     if CommandLine.arguments.contains("--dump-snapshot") {
       let result = LocalRepository().conversations()
       let usage = AxClient.executable().flatMap { try? AxClient.usage(executable: $0) } ?? []

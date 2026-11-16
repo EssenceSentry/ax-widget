@@ -60,11 +60,9 @@ struct QuestionForm: View {
           Text(error).font(.system(size: 10)).foregroundStyle(palette.secondary)
             .fixedSize(horizontal: false, vertical: true)
           if error == QuestionDeliveryError.accessibilityRequired.localizedDescription,
-            let settings = URL(
-              string:
-                "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+            let settings = URL(string: "ax-widget://accessibility")
           {
-            Link("Open Accessibility Settings", destination: settings).font(.system(size: 11))
+            Link("Enable Claude replies…", destination: settings).font(.system(size: 11))
           }
         }
         HStack(spacing: 10) {

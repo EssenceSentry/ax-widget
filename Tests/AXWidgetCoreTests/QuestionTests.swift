@@ -185,6 +185,56 @@ private func codexAsk(_ call: String = "call-widget", multiple: Bool = false) th
   #expect(Provider.codex.newConversationURL(project: "relative/path") == nil)
 }
 
+@Test func claudeNativeAnswerClearsTheIncrementalAndColdQuestionReaders() throws {
+  let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let source = directory.appendingPathComponent("claude-native-answer.jsonl")
+  let ask = try line([
+    "type": "assistant",
+    "message": [
+      "content": [
+        [
+          "type": "tool_use", "id": "native-question", "name": "AskUserQuestion",
+          "input": [
+            "questions": [
+              [
+                "question": "Continue?",
+                "options": [
+                  ["label": "Continue", "description": "Proceed."],
+                  ["label": "Wait", "description": "Stay paused."],
+                ],
+              ]
+            ]
+          ],
+        ]
+      ]
+    ],
+  ])
+  try (ask + "\n").write(to: source, atomically: true, encoding: .utf8)
+  #expect(try TranscriptReader.read(source).questions.map(\.id) == ["native-question"])
+  let reply = try line([
+    "type": "user",
+    "message": [
+      "role": "user",
+      "content": [
+        [
+          "type": "tool_result", "tool_use_id": "native-question",
+          "content": "User has answered your questions. Continue with that answer.",
+        ]
+      ],
+    ], "toolUseResult": ["answers": ["Continue?": "Continue"]],
+  ])
+  let writer = try FileHandle(forWritingTo: source)
+  try writer.seekToEnd()
+  try writer.write(contentsOf: Data((reply + "\n").utf8))
+  try writer.close()
+  #expect(try !TranscriptReader.read(source).needsInput)
+  let cold = directory.appendingPathComponent("claude-cold-answer.jsonl")
+  try FileManager.default.copyItem(at: source, to: cold)
+  #expect(try TranscriptReader.read(cold).questions.isEmpty)
+}
+
 @Test func pendingQuestionSurvivesLargeToolOutputAndSplitReplyRecords() throws {
   let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

@@ -7,6 +7,12 @@ import Foundation
 enum ClaudeQuestionClient {
   static var isTrusted: Bool { AXIsProcessTrusted() }
 
+  /// Only called after an explicit user action, never during background refresh.
+  static func requestAccessibility() -> Bool {
+    AXIsProcessTrustedWithOptions(
+      [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
+  }
+
   static func reply(pid: Int32, group: AgentQuestionGroup, answers: [String: [String]]) throws {
     guard isTrusted else { throw QuestionDeliveryError.accessibilityRequired }
     guard group.kind == .claude, !group.questions.isEmpty else {

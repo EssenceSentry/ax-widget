@@ -54,6 +54,10 @@ are included. There is no brand/count header and no built-in chat editor.
   installed client handles question submission inside its renderer. AX Widget
   matches the original question and submit control; ambiguous forms stay unanswered.
   Without this permission, **Open Claude** remains available.
+  Choose **Enable Claude replies…** from the menu-bar menu or the question form
+  to request access, then enable **AX Widget** in macOS Accessibility settings.
+  Background refresh never requests permission. Answers submitted in Claude
+  clear from the widget when its native tool-result record is saved.
 - Unknown, stale, or expired usage shows a neutral continuous track and an em dash.
 - All rings use continuous strokes. The supplied OpenAI and Claude SVG marks stay
   vector artwork; OpenAI adapts to the selected appearance.
