@@ -17,10 +17,13 @@ are included. There is no brand/count header and no built-in chat editor.
 - Drag the icon pair to position it. Click to expand; click outside or press
   Escape to collapse. The position is remembered and constrained to the screen.
 - The expanded panel shows the latest original agent prose, not tool logs or an
-  invented summary. More expands the text in place.
+  invented summary. More expands the text in place. The panel grows and shrinks
+  with its content; scrolling begins only at the available screen height.
 - Numeric progress comes from ax tasks. Reaching a task total does not imply
   that the conversation is complete.
 - Unknown, stale, or expired usage shows a neutral continuous track and an em dash.
+- All rings use continuous strokes. The supplied OpenAI and Claude SVG marks stay
+  vector artwork; OpenAI adapts to the selected appearance.
 - The menu-bar item controls floating visibility, appearance, refresh, and quit.
 
 ## Notification Center and desktop widgets
@@ -69,7 +72,8 @@ appearances in all four layouts; these are not evidence of system-widget hosting
 
 ## Local data
 
-The app reads ax's conversation catalog and running task state, supplements titles
+The app reads ax's conversation catalog and queries running tasks through its
+local daemon socket, supplements titles
 and registration from the native local clients, and reads a bounded recent tail
 of relevant transcripts. Usage comes from `ax usage` once per minute, without
 `--refresh`. Conversation updates poll every four seconds; reads are performed

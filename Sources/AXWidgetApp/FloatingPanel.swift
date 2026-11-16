@@ -38,6 +38,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   private var globalMonitor: Any?
   private var localMonitor: Any?
   private var expanded = false
+  private var expandedTop: CGFloat = 0
   private var collapsedOrigin: NSPoint
   var openConversation: ((Conversation) -> Void)?
 
@@ -89,12 +90,14 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     expanded = true
     let screen = panel.screen?.visibleFrame ?? NSScreen.main!.visibleFrame
     let measurement = NSHostingView(
-      rootView: ConversationsView(snapshot: store.snapshot, open: { _ in }).frame(width: 384))
-    let height = min(max(240, measurement.fittingSize.height + 57), min(620, screen.height - 40))
+      rootView: ConversationsView(snapshot: store.snapshot, open: { _ in })
+        .frame(width: 384).fixedSize(horizontal: false, vertical: true))
+    let height = min(measurement.fittingSize.height + 43, screen.height - 24)
     let frame = NSRect(
       x: min(max(screen.minX + 12, collapsedOrigin.x - 324), screen.maxX - 432),
       y: min(max(screen.minY + 12, collapsedOrigin.y + 48 - height), screen.maxY - height - 12),
       width: 420, height: height)
+    expandedTop = frame.maxY
     panel.setFrame(
       frame, display: true, animate: !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     update(store.snapshot)
@@ -137,10 +140,21 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
 
   private func content(_ snapshot: Snapshot) -> PanelContent {
     PanelContent(
-      snapshot: snapshot, collapse: { [weak self] in self?.collapse() },
+      snapshot: snapshot, heightChanged: { [weak self] height in self?.fitContent(height) },
+      collapse: { [weak self] in self?.collapse() },
       open: { [weak self] conversation in
         self?.openConversation?(conversation)
       })
+  }
+
+  private func fitContent(_ naturalHeight: CGFloat) {
+    guard expanded, naturalHeight.isFinite, naturalHeight > 0,
+      let screen = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+    else { return }
+    let height = min(naturalHeight, screen.height - 24)
+    let y = max(screen.minY + 12, min(expandedTop, screen.maxY - 12) - height)
+    guard abs(panel.frame.height - height) > 0.5 || abs(panel.frame.minY - y) > 0.5 else { return }
+    panel.setFrame(NSRect(x: panel.frame.minX, y: y, width: 420, height: height), display: true)
   }
 
   private func outsideClick() {

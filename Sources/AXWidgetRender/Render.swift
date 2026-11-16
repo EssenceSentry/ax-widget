@@ -18,7 +18,7 @@ import SwiftUI
         to: output.appendingPathComponent("\(appearance.rawValue)-collapsed.png"))
       try render(
         PanelContent(snapshot: snapshot, nativeEffects: false, collapse: {}, open: { _ in }),
-        width: 420, height: 465,
+        width: 420,
         to: output.appendingPathComponent("\(appearance.rawValue)-expanded.png"))
       try render(
         SmallUsageWidget(snapshot: snapshot).padding(14).background(palette.background),
@@ -33,9 +33,11 @@ import SwiftUI
   }
 
   @MainActor private static func render<V: View>(
-    _ view: V, width: CGFloat, height: CGFloat, to url: URL
+    _ view: V, width: CGFloat, height: CGFloat? = nil, to url: URL
   ) throws {
-    let renderer = ImageRenderer(content: view.frame(width: width, height: height))
+    let renderer = ImageRenderer(
+      content: view.frame(width: width, height: height)
+        .fixedSize(horizontal: false, vertical: height == nil))
     renderer.scale = 2
     guard let image = renderer.nsImage,
       let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),

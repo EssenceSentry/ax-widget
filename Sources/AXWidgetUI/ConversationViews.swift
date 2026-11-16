@@ -153,13 +153,16 @@ public struct PanelContent: View {
   public var collapse: () -> Void
   public var open: (Conversation) -> Void
   public var nativeEffects: Bool
+  public var heightChanged: ((CGFloat) -> Void)?
   @Environment(\.colorScheme) private var scheme
   public init(
-    snapshot: Snapshot, nativeEffects: Bool = true, collapse: @escaping () -> Void,
+    snapshot: Snapshot, nativeEffects: Bool = true, heightChanged: ((CGFloat) -> Void)? = nil,
+    collapse: @escaping () -> Void,
     open: @escaping (Conversation) -> Void
   ) {
     self.snapshot = snapshot
     self.nativeEffects = nativeEffects
+    self.heightChanged = heightChanged
     self.collapse = collapse
     self.open = open
   }
@@ -179,6 +182,15 @@ public struct PanelContent: View {
           ConversationsView(snapshot: snapshot, open: open).padding(.horizontal, 18).padding(
             .top, 10
           ).padding(.bottom, 17)
+            .fixedSize(horizontal: false, vertical: true)
+            .background {
+              GeometryReader { geometry in
+                Color.clear.onChange(of: geometry.size.height, initial: true) { _, height in
+                  // Wait until this layout pass finishes before resizing the NSPanel.
+                  DispatchQueue.main.async { heightChanged?(height + 16) }
+                }
+              }
+            }
         }.scrollIndicators(.hidden)
       } else {
         ConversationsView(snapshot: snapshot, open: open).padding(.horizontal, 18).padding(.top, 10)

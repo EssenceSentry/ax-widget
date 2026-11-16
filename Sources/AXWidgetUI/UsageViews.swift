@@ -2,18 +2,30 @@ import AXWidgetCore
 import SwiftUI
 
 public struct ProviderGlyph: View {
+  private static let artwork: [Provider: NSImage] = Dictionary(
+    uniqueKeysWithValues:
+      Provider.allCases.compactMap { provider in
+        guard let url = Bundle.module.url(forResource: provider.rawValue, withExtension: "svg"),
+          let image = NSImage(contentsOf: url)
+        else { return nil }
+        return (provider, image)
+      })
   public var provider: Provider
   public var size: CGFloat
-  public init(_ provider: Provider, size: CGFloat = 21) {
+  public var tint: Color
+  public init(_ provider: Provider, size: CGFloat = 21, tint: Color = .primary) {
     self.provider = provider
     self.size = size
+    self.tint = tint
   }
   public var body: some View {
     Group {
-      if let url = Bundle.module.url(forResource: provider.rawValue, withExtension: "png"),
-        let image = NSImage(contentsOf: url)
-      {
-        Image(nsImage: image).resizable().scaledToFit()
+      if let image = Self.artwork[provider] {
+        if provider == .codex {
+          tint.mask(Image(nsImage: image).resizable().scaledToFit())
+        } else {
+          Image(nsImage: image).resizable().scaledToFit()
+        }
       } else {
         Image(
           systemName: provider == .codex
@@ -51,7 +63,7 @@ public struct ProviderGauge: View {
         ring(snapshot.claudeWeekly, color: palette.violet, inset: 1)
         ring(snapshot.claudeFiveHour, color: palette.peach, inset: 6)
       }
-      ProviderGlyph(provider, size: size * 0.47)
+      ProviderGlyph(provider, size: size * 0.47, tint: palette.foreground)
       if attention {
         Circle().fill(.orange).frame(width: 6, height: 6)
           .overlay(Circle().stroke(palette.background, lineWidth: 1.5))
