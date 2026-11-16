@@ -117,7 +117,7 @@ public struct ConversationsView: View {
       }
       HStack(alignment: .top, spacing: 6) {
         if conversation.needsAttention {
-          Circle().fill(.orange).frame(width: 6, height: 6).padding(.top, 5)
+          Circle().fill(palette.blue).frame(width: 6, height: 6).padding(.top, 5)
         }
         update(document, conversation: conversation, featured: featured, palette: palette)
           .foregroundStyle(

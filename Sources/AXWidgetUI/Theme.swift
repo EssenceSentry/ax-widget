@@ -34,6 +34,7 @@ public struct Palette {
   }
   public var surfaceOpacity: Double { frost ? 0.42 : 0.88 }
   public var blue: Color { Color(red: 0.26, green: 0.62, blue: 0.98) }
+  public var blueText: Color { dark ? blue : Color(red: 0.14, green: 0.40, blue: 0.72) }
   public var peach: Color { Color(red: 0.96, green: 0.58, blue: 0.42) }
   public var violet: Color { Color(red: 0.65, green: 0.53, blue: 0.91) }
   public var peachText: Color { dark ? peach : Color(red: 0.66, green: 0.33, blue: 0.20) }

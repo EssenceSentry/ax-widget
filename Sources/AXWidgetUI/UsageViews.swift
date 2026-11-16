@@ -65,7 +65,7 @@ public struct ProviderGauge: View {
       }
       ProviderGlyph(provider, size: size * 0.47, tint: palette.foreground)
       if attention {
-        Circle().fill(.orange).frame(width: 6, height: 6)
+        Circle().fill(palette.blue).frame(width: 6, height: 6)
           .overlay(Circle().stroke(palette.background, lineWidth: 1.5))
           .offset(x: size * 0.38, y: -size * 0.38)
       }

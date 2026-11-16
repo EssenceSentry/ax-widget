@@ -40,7 +40,7 @@ struct QuestionForm: View {
       VStack(alignment: .leading, spacing: 10) {
         HStack(spacing: 8) {
           Label("Needs your answer", systemImage: "questionmark.circle.fill")
-            .font(.system(size: 10, weight: .medium)).foregroundStyle(palette.peachText)
+            .font(.system(size: 10, weight: .medium)).foregroundStyle(palette.blueText)
           Spacer(minLength: 4)
           Button {
             draft.currentID = targets[currentIndex - 1].id
@@ -104,7 +104,7 @@ struct QuestionForm: View {
       }.padding(11).foregroundStyle(palette.foreground)
         .background(palette.track.opacity(0.28), in: RoundedRectangle(cornerRadius: 9))
         .overlay(
-          RoundedRectangle(cornerRadius: 9).stroke(palette.peach.opacity(0.55), lineWidth: 0.8))
+          RoundedRectangle(cornerRadius: 9).stroke(palette.blue.opacity(0.55), lineWidth: 0.8))
     }
   }
 

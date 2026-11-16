@@ -40,7 +40,7 @@ are included. There is no brand/count header and no built-in chat editor.
   while a numeric progress counter is visible.
 - **New Codex** and **New Claude** open a native new-chat composer using the most
   recent working folder for that provider. Opening the composer sends no prompt.
-- An orange provider dot marks a pending question, in the floating pill and the
+- A blue provider dot marks a pending question, in the floating pill and the
   small system widget. The expanded panel shows one question at a time, with
   previous/next arrows and a position counter. Choices and typed drafts are kept
   while navigating. A text field is included where allowed. **Send answer**
