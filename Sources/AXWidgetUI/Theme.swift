@@ -18,6 +18,8 @@ public struct Palette {
   public var blue: Color { Color(red: 0.26, green: 0.62, blue: 0.98) }
   public var peach: Color { Color(red: 0.96, green: 0.58, blue: 0.42) }
   public var violet: Color { Color(red: 0.65, green: 0.53, blue: 0.91) }
+  public var peachText: Color { dark ? peach : Color(red: 0.66, green: 0.33, blue: 0.20) }
+  public var violetText: Color { dark ? violet : Color(red: 0.43, green: 0.32, blue: 0.66) }
 }
 
 extension Appearance {

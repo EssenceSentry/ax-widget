@@ -40,7 +40,7 @@ import Foundation
     entry.submenu = appearance
     menu.addItem(.separator())
     let widgets = menu.addItem(
-      withTitle: "Notification Center Widgets…", action: #selector(showWidgetHelp),
+      withTitle: "Add Usage Widget…", action: #selector(showWidgetHelp),
       keyEquivalent: "")
     widgets.target = self
     let refresh = menu.addItem(withTitle: "Refresh", action: #selector(refresh), keyEquivalent: "r")
@@ -67,7 +67,7 @@ import Foundation
     let alert = NSAlert()
     alert.messageText = "Add AX Widget to Notification Center"
     alert.informativeText =
-      "Click the date and time in the menu bar, choose Edit Widgets, and search for AX Widget. Choose Usage or Conversations. You can also place them on the desktop.\n\nSystem widgets show a snapshot; macOS controls their refresh timing. Keep AX Widget running to publish updated data."
+      "Click the date and time in the menu bar, choose Edit Widgets, and search for AX Widget. Add the small Usage widget. You can also place it on the desktop.\n\nThe widget shows a snapshot; macOS controls its refresh timing. Keep AX Widget running to publish updated data. Click it to open the floating conversation panel."
     alert.addButton(withTitle: "OK")
     NSApp.activate(ignoringOtherApps: true)
     alert.runModal()

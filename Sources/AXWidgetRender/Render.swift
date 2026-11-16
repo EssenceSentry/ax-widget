@@ -53,12 +53,21 @@ import SwiftUI
         SmallUsageWidget(snapshot: snapshot).padding(14).background(palette.background),
         width: 170, height: 170,
         to: output.appendingPathComponent("\(appearance.rawValue)-usage-widget.png"))
-      try render(
-        LargeConversationWidget(snapshot: snapshot).padding(16).background(palette.background),
-        width: 360, height: 360,
-        to: output.appendingPathComponent("\(appearance.rawValue)-conversations-widget.png"))
+      for status in ["full", "unavailable"] {
+        var variant = snapshot
+        for index in variant.allowances.indices {
+          variant.allowances[index].used = status == "full" ? 0 : nil
+          variant.allowances[index].status = status == "full" ? "fresh" : "unavailable"
+        }
+        try render(
+          SmallUsageWidget(snapshot: variant).padding(14).background(palette.background),
+          width: 170, height: 170,
+          to: output.appendingPathComponent("\(appearance.rawValue)-usage-widget-\(status).png"))
+      }
     }
-    print("Rendered Carbon and Porcelain in four native layouts to \(output.path)")
+    print(
+      "Rendered Carbon and Porcelain floating, usage-widget, and Markdown previews to \(output.path)"
+    )
   }
 
   @MainActor private static func render<V: View>(

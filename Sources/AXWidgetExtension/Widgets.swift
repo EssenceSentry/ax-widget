@@ -33,26 +33,8 @@ struct UsageWidget: Widget {
         .widgetURL(URL(string: "ax-widget://show"))
     }
     .configurationDisplayName("AX Widget · Usage")
-    .description("Remaining Claude and Codex allowance, with reset times.")
+    .description("Claude and Codex remaining allowance in two compact provider rings.")
     .supportedFamilies([.systemSmall])
-  }
-}
-
-struct ConversationsWidget: Widget {
-  let kind = "AXConversationsWidget"
-  var body: some WidgetConfiguration {
-    StaticConfiguration(kind: kind, provider: Provider()) { entry in
-      LargeConversationWidget(snapshot: entry.snapshot)
-        .containerBackground(for: .widget) {
-          WidgetBackground(appearance: entry.snapshot.appearance)
-        }
-        .widgetURL(URL(string: "ax-widget://show"))
-    }
-    .configurationDisplayName("AX Widget · Conversations")
-    .description(
-      "Recent agent updates and task progress. Click a title to open its original conversation."
-    )
-    .supportedFamilies([.systemLarge])
   }
 }
 
@@ -65,6 +47,5 @@ private struct WidgetBackground: View {
 @main struct AXWidgets: WidgetBundle {
   var body: some Widget {
     UsageWidget()
-    ConversationsWidget()
   }
 }

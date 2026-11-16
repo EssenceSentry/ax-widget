@@ -6,7 +6,7 @@ expand recent conversations, their latest agent-written update, and task progres
 Click a conversation title to open that exact chat in its native desktop app.
 
 **Carbon** and **Porcelain** share the same layout and follow system appearance
-by default. Both the floating interface and native Notification Center widgets
+by default. Both the floating interface and a small native Notification Center widget
 are included. There is no brand/count header and no built-in chat editor.
 
 ## Floating mode
@@ -31,17 +31,22 @@ are included. There is no brand/count header and no built-in chat editor.
   vector artwork; OpenAI adapts to the selected appearance.
 - The menu-bar item controls floating visibility, appearance, refresh, and quit.
 
-## Notification Center and desktop widgets
+## Notification Center and desktop widget
 
-The app contains a real WidgetKit extension with a small usage widget and a
-large conversation widget. After launching the installed app, open Notification
-Center, choose Edit Widgets, and search for **AX Widget**. The same widgets can
-be placed on the desktop. Floating mode can be hidden independently.
+The app contains one small WidgetKit usage widget: two provider icons, continuous
+remaining-allowance rings, and compact percentages. Claude's five-hour percentage
+uses the inner-ring color; its weekly percentage uses the outer-ring color.
+There are no repeated provider names or reset-time rows. Hover a ring for details.
+After launching the installed app, open Notification Center, choose Edit Widgets,
+and search for **AX Widget**. The same widget can be placed on the desktop.
+Conversation updates live in the floating panel; there is no large system widget.
+Floating mode can be hidden independently.
 
-Widgets read a private snapshot written by the app; keep the app running for new
-data. macOS controls their refresh timing, so they are glanceable snapshots.
-Reset times and an update age remain visible. Conversation links open the app
-and then the exact provider conversation; they never submit a prompt.
+The widget reads a private snapshot written by the app; keep the app running for
+new data. macOS controls its refresh timing, so it is a glanceable snapshot.
+Hover for reset and observation details. Click the usage widget to open the floating
+conversation panel. Conversation titles there open their exact provider chat;
+they never submit a prompt.
 
 The local-development extension has a narrow read-only sandbox exception for
 `~/Library/Application Support/ax-widget/`. It cannot read provider histories or
@@ -73,7 +78,8 @@ swift run AXWidgetRender build/previews
 
 Demo mode is labeled, never opens synthetic conversations, and never overwrites
 the live widget snapshot. The renderer produces native SwiftUI previews of both
-appearances in all four layouts; these are not evidence of system-widget hosting.
+appearances in the floating and small-widget layouts, plus a Markdown sample;
+these are not evidence of system-widget hosting.
 
 ## Local data
 

@@ -7,7 +7,7 @@ user explicitly agrees on their number, model, and reasoning effort.
 Carbon and Porcelain are the only appearance variants. Preserve the approved Focus
 layout in docs/design: no brand/count header, latest agent-written prose, tiny
 provider usage rings (one Codex, inner Claude five-hour and outer weekly), native
-conversation links, fixed-size system widgets, and no notification service.
+conversation links, one small fixed-size system usage widget, and no notification service.
 
 The app reads local state; no model calls, sending messages, new conversations,
 notifications, analytics, Cloudflare, or HTTP server. Unknown/stale usage stays
