@@ -14,10 +14,14 @@ are included. There is no brand/count header and no built-in chat editor.
 - Codex has one remaining-allowance ring. Claude's inner ring shows five-hour
   allowance and the outer ring shows weekly allowance.
 - Hover for percentage remaining, reset time, and observation age.
-- Drag the icon pair to position it. Click to open a separate conversation panel
-  just below it, with a small gap. The pill stays visible. Dragging moves the pair
-  together; clicking outside or pressing Escape hides only the lower panel.
-  The position is remembered and constrained to the screen.
+- Click the menu-bar icon or the small system widget to open the expanded panel.
+  Right-click the menu-bar icon for options. **Keep floating** is off by default:
+  closing the panel hides both windows. Enable it to keep the tiny usage pill
+  visible while closed; explicit existing preferences are preserved.
+- Drag the icon pair to position it. Its conversation panel opens just below it,
+  with a small gap. Dragging moves the pair together. Click outside or press
+  Escape to close, or click the menu-bar icon again. The position is remembered
+  and constrained to the screen.
 - Conversations are sorted by most recent activity, limited to the last 12 hours.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. More expands the text in place. The panel grows and shrinks
@@ -31,7 +35,7 @@ are included. There is no brand/count header and no built-in chat editor.
 - Unknown, stale, or expired usage shows a neutral continuous track and an em dash.
 - All rings use continuous strokes. The supplied OpenAI and Claude SVG marks stay
   vector artwork; OpenAI adapts to the selected appearance.
-- The menu-bar item controls floating visibility, appearance, refresh, and quit.
+- Right-click the menu-bar icon to control Keep floating, appearance, refresh, and quit.
 
 ## Notification Center and desktop widget
 

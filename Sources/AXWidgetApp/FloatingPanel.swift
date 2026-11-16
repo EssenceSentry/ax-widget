@@ -38,15 +38,20 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   private var subscription: AnyCancellable?
   private var globalMonitor: Any?
   private var localMonitor: Any?
-  private var expanded = false
+  private var presentation: FloatingPresentation
+  private var expanded: Bool { presentation.isExpanded }
+  var keepFloating: Bool { presentation.keepFloating }
   private var contentHeight: CGFloat = 0
   private var collapsedOrigin: NSPoint
   var openConversation: ((Conversation) -> Void)?
+  var isTriggerClick: ((NSPoint) -> Bool)?
 
   init(store: AppStore) {
     self.store = store
     let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
     let defaults = UserDefaults.standard
+    presentation = FloatingPresentation(
+      keepFloating: defaults.object(forKey: "showFloating") as? Bool ?? false)
     let x = defaults.object(forKey: "floatingX") as? Double ?? screen.maxX - 116
     let y = defaults.object(forKey: "floatingY") as? Double ?? screen.midY
     collapsedOrigin = NSPoint(x: x, y: y)
@@ -86,20 +91,29 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     collapse()
   }
 
-  func setVisible(_ visible: Bool) {
-    if visible {
-      panel.orderFrontRegardless()
-      if expanded { details.orderFrontRegardless() }
+  func setKeepFloating(_ keep: Bool) {
+    presentation.keepFloating = keep
+    UserDefaults.standard.set(keep, forKey: "showFloating")
+    applyVisibility()
+  }
+
+  func toggle() {
+    if expanded { collapse() } else { expand() }
+  }
+
+  private func applyVisibility() {
+    if presentation.usageVisible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
+    if presentation.conversationsVisible {
+      details.orderFrontRegardless()
     } else {
       details.orderOut(nil)
-      panel.orderOut(nil)
     }
   }
 
   func expand() {
     guard !expanded else { return }
     collapsedOrigin = panel.frame.origin
-    expanded = true
+    presentation.open()
     let measurement = NSHostingView(
       rootView: ConversationsView(snapshot: store.snapshot, open: { _ in })
         .frame(width: 384).fixedSize(horizontal: false, vertical: true))
@@ -110,7 +124,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   }
 
   func collapse() {
-    expanded = false
+    presentation.close()
     details.orderOut(nil)
     let screen =
       panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
@@ -120,9 +134,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     panel.setFrame(
       NSRect(origin: collapsedOrigin, size: NSSize(width: 96, height: 48)), display: true)
     update(store.snapshot)
-    if UserDefaults.standard.object(forKey: "showFloating") as? Bool != false {
-      panel.orderFrontRegardless()
-    }
+    applyVisibility()
   }
 
   private func update(_ snapshot: Snapshot) {
@@ -174,6 +186,9 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   }
 
   private func outsideClick() {
+    // Let the status button handle its own toggle; collapsing on mouse-down
+    // would otherwise reopen the panel on the same click's mouse-up.
+    if isTriggerClick?(NSEvent.mouseLocation) == true { return }
     if expanded, !panel.frame.contains(NSEvent.mouseLocation),
       !details.frame.contains(NSEvent.mouseLocation)
     {

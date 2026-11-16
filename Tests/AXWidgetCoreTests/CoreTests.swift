@@ -6,6 +6,33 @@ import Testing
 
 private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+@Test func transientPanelHidesBothWindowsWhenClosed() {
+  var presentation = FloatingPresentation()
+  #expect(!presentation.usageVisible && !presentation.conversationsVisible)
+  presentation.open()
+  #expect(presentation.usageVisible && presentation.conversationsVisible)
+  presentation.close()
+  #expect(!presentation.usageVisible && !presentation.conversationsVisible)
+}
+
+@Test func keepingFloatingRetainsOnlyThePillWhenClosed() {
+  var presentation = FloatingPresentation(keepFloating: true)
+  #expect(presentation.usageVisible && !presentation.conversationsVisible)
+  presentation.toggle()
+  #expect(presentation.usageVisible && presentation.conversationsVisible)
+  presentation.toggle()
+  #expect(presentation.usageVisible && !presentation.conversationsVisible)
+}
+
+@Test func disablingFloatingDoesNotDismissAnOpenPanel() {
+  var presentation = FloatingPresentation(keepFloating: true)
+  presentation.open()
+  presentation.keepFloating = false
+  #expect(presentation.usageVisible && presentation.conversationsVisible)
+  presentation.close()
+  #expect(!presentation.usageVisible && !presentation.conversationsVisible)
+}
+
 @Test func markdownKeepsLineBreaksAndInlineFormatting() {
   let rendered = UpdateMarkdown.render(
     "**Ready** and *waiting* for `tests`.\n\n[Open](https://example.com)")

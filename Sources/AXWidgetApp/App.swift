@@ -7,26 +7,36 @@ import Foundation
   let store = AppStore(demo: CommandLine.arguments.contains("--demo"))
   private var floating: FloatingController!
   private var statusItem: NSStatusItem!
+  private var pendingURLs: [URL] = []
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     floating = FloatingController(store: store)
     floating.openConversation = { [weak self] conversation in self?.open(conversation) }
     statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    statusItem.button?.image = NSImage(
-      systemSymbolName: "circle.circle", accessibilityDescription: "AX Widget")
-    let menu = NSMenu()
-    menu.delegate = self
-    statusItem.menu = menu
+    if let button = statusItem.button {
+      button.image = NSImage(
+        systemSymbolName: "circle.circle", accessibilityDescription: "AX Widget")
+      button.toolTip = "Click to toggle conversations · Right-click for options"
+      button.target = self
+      button.action = #selector(statusClicked(_:))
+      button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+    }
+    floating.isTriggerClick = { [weak self] point in
+      guard let button = self?.statusItem.button, let window = button.window else { return false }
+      return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
+    }
     store.start()
     if CommandLine.arguments.contains("--expanded") { floating.expand() }
+    let urls = pendingURLs
+    pendingURLs.removeAll()
+    if !urls.isEmpty { application(NSApp, open: urls) }
   }
 
   func menuNeedsUpdate(_ menu: NSMenu) {
     menu.removeAllItems()
-    let visible = UserDefaults.standard.object(forKey: "showFloating") as? Bool != false
     let toggle = menu.addItem(
-      withTitle: "Floating Widget", action: #selector(toggleFloating), keyEquivalent: "")
-    toggle.state = visible ? .on : .off
+      withTitle: "Keep floating", action: #selector(toggleFloating), keyEquivalent: "")
+    toggle.state = floating.keepFloating ? .on : .off
     toggle.target = self
     let appearance = NSMenu()
     for value in Appearance.allCases {
@@ -51,10 +61,21 @@ import Foundation
     quit.target = self
   }
 
+  @objc private func statusClicked(_ sender: NSStatusBarButton) {
+    if let event = NSApp.currentEvent,
+      event.type == .rightMouseUp || event.modifierFlags.contains(.control)
+    {
+      let menu = NSMenu()
+      menu.delegate = self
+      menuNeedsUpdate(menu)
+      NSMenu.popUpContextMenu(menu, with: event, for: sender)
+    } else {
+      floating.toggle()
+    }
+  }
+
   @objc private func toggleFloating() {
-    let value = !(UserDefaults.standard.object(forKey: "showFloating") as? Bool != false)
-    UserDefaults.standard.set(value, forKey: "showFloating")
-    floating.setVisible(value)
+    floating.setKeepFloating(!floating.keepFloating)
   }
   @objc private func setAppearance(_ sender: NSMenuItem) {
     if let raw = sender.representedObject as? String, let appearance = Appearance(rawValue: raw) {
@@ -106,6 +127,10 @@ import Foundation
   }
 
   func application(_ application: NSApplication, open urls: [URL]) {
+    guard floating != nil else {
+      pendingURLs.append(contentsOf: urls)
+      return
+    }
     for url in urls {
       guard url.scheme == "ax-widget" else { continue }
       if url.host == "show" {
