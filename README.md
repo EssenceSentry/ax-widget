@@ -19,6 +19,8 @@ are included. There is no brand/count header and no built-in chat editor.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. More expands the text in place. The panel grows and shrinks
   with its content; scrolling begins only at the available screen height.
+- Updates render inline Markdown (bold, italics, code, and links), preserving
+  paragraph breaks when expanded.
 - Numeric progress comes from ax tasks. Reaching a task total does not imply
   that the conversation is complete.
 - Unknown, stale, or expired usage shows a neutral continuous track and an em dash.

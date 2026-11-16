@@ -6,6 +6,17 @@ import Testing
 
 private let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+@Test func markdownKeepsLineBreaksAndInlineFormatting() {
+  let rendered = UpdateMarkdown.render(
+    "**Ready** and *waiting* for `tests`.\n\n[Open](https://example.com)")
+  #expect(String(rendered.characters) == "Ready and waiting for tests.\n\nOpen")
+  #expect(
+    rendered.runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+  #expect(rendered.runs.contains { $0.inlinePresentationIntent?.contains(.emphasized) == true })
+  #expect(rendered.runs.contains { $0.inlinePresentationIntent?.contains(.code) == true })
+  #expect(rendered.runs.contains { $0.link == URL(string: "https://example.com") })
+}
+
 @Test func remainingIsAllowanceLeftAndNeverInvented() {
   let valid = Allowance(
     provider: .claude, name: "five_hour", used: 78, observed: now,

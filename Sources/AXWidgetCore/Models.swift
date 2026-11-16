@@ -192,12 +192,12 @@ public struct Snapshot: Codable, Equatable, Sendable {
         Conversation(
           provider: .claude, sessionID: "22222222-2222-4222-8222-222222222222",
           title: "Model audit", updated: date.addingTimeInterval(-480),
-          latestUpdate: "Paused until the allowance resets.",
+          latestUpdate: "**Paused** until the allowance resets.",
           updateAt: date.addingTimeInterval(-480)),
         Conversation(
           provider: .claude, sessionID: "33333333-3333-4333-8333-333333333333",
           title: "Taxonomy review", updated: date.addingTimeInterval(-300),
-          latestUpdate: "The review is ready. I need your decision on the cutoff.",
+          latestUpdate: "The review is *ready*. I need your decision on the `cutoff`.",
           updateAt: date.addingTimeInterval(-300), needsAttention: true),
       ], isDemo: true)
   }

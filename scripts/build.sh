@@ -24,4 +24,7 @@ else
 fi
 codesign --force --sign - --options runtime 'dist/AX Widget.app'
 codesign --verify --deep --strict 'dist/AX Widget.app'
+if [[ -d 'dist/AX Widget.app/Contents/PlugIns/AXWidgetExtension.appex' ]]; then
+    python3 scripts/verify-bundle.py 'dist/AX Widget.app'
+fi
 echo 'Built dist/AX Widget.app'

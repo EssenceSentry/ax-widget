@@ -91,11 +91,12 @@ public struct ConversationsView: View {
           Circle().fill(.orange).frame(width: 6, height: 6).padding(.top, 5)
         }
         Text(
-          conversation.latestUpdate.isEmpty
-            ? "Latest update unavailable"
-            : (presentation.expanded.contains(conversation.id)
-              ? conversation.latestUpdate
-              : conversation.latestUpdate.replacingOccurrences(of: "\n\n", with: " "))
+          UpdateMarkdown.render(
+            conversation.latestUpdate.isEmpty
+              ? "Latest update unavailable"
+              : (presentation.expanded.contains(conversation.id)
+                ? conversation.latestUpdate
+                : conversation.latestUpdate.replacingOccurrences(of: "\n\n", with: " ")))
         )
         .font(.system(size: compact ? 11 : 13))
         .foregroundStyle(conversation.latestUpdate.isEmpty ? palette.secondary : palette.foreground)
