@@ -17,14 +17,16 @@ are included. There is no brand/count header and no built-in chat editor.
 - Click the menu-bar icon or the small system widget to open the expanded panel.
   Right-click the menu-bar icon for options. **Keep floating** is off by default:
   closing the panel hides both windows. Enable it to keep the tiny usage pill
-  visible while closed; explicit existing preferences are preserved.
+  visible while closed; explicit existing preferences are preserved. Its pin
+  control sits immediately to the left of the new-conversation buttons.
 - Drag the icon pair to position it. Its conversation panel opens just below it,
   with a small gap. Dragging moves the pair together. Click outside or press
   Escape to close, or click the menu-bar icon again. The position is remembered
   and constrained to the screen.
 - Conversations are sorted by most recent activity, limited to the last 12 hours.
 - The expanded panel shows the latest original agent prose, not tool logs or an
-  invented summary. More expands the text in place. The panel grows and shrinks
+  invented summary. **More** appears only when the rendered preview actually
+  clips content, and expands the text in place. The panel grows and shrinks
   with its content; scrolling begins only at the available screen height.
 - Updates render native Markdown: bold, italics, links, headings, lists, code
   blocks, and wrapping tables. Internal memory-citation markup is hidden.
@@ -37,9 +39,12 @@ are included. There is no brand/count header and no built-in chat editor.
 - **New Codex** and **New Claude** open a native new-chat composer using the most
   recent working folder for that provider. Opening the composer sends no prompt.
 - An orange provider dot marks a pending question, in the floating pill and the
-  small system widget; the menu-bar **ax** label also turns orange. The expanded panel shows the original choices and a text
-  field where allowed. **Send answer** submits the selected response to that same
+  small system widget. The expanded panel shows one question at a time, with
+  previous/next arrows and a position counter. Choices and typed drafts are kept
+  while navigating. A text field is included where allowed. **Send answer**
+  submits the selected response to that same
   conversation; its pending indicator clears when the native transcript records it.
+  When an agent asks several questions together, fill them in and use **Send answers**.
 - Claude inline answers require macOS Accessibility permission, because the
   installed client handles question submission inside its renderer. AX Widget
   matches the original question and submit control; ambiguous forms stay unanswered.
@@ -47,7 +52,7 @@ are included. There is no brand/count header and no built-in chat editor.
 - Unknown, stale, or expired usage shows a neutral continuous track and an em dash.
 - All rings use continuous strokes. The supplied OpenAI and Claude SVG marks stay
   vector artwork; OpenAI adapts to the selected appearance.
-- The menu-bar icon reads **ax**. Right-click it to control Keep floating,
+- The menu-bar icon is a pure-white axe silhouette. Right-click it to control Keep floating,
   appearance, refresh, and quit.
 
 ## Notification Center and desktop widget
@@ -114,7 +119,8 @@ these are not evidence of system-widget hosting.
 The app reads ax's conversation catalog and queries running tasks through its
 local daemon socket, supplements titles
 and registration from the native local clients, and reads a bounded recent tail
-of relevant transcripts. Usage comes from `ax usage` once per minute, without
+of relevant transcripts for prose. A separate incremental question cursor keeps
+unanswered prompts visible even after lengthy tool output. Usage comes from `ax usage` once per minute, without
 `--refresh`. Conversation updates poll every four seconds; reads are performed
 off the main thread. Shared snapshots have owner-only permissions.
 

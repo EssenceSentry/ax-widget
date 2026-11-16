@@ -20,11 +20,11 @@ import Foundation
       guard let self else { return "AX Widget is unavailable." }
       return await self.answer(conversation, group: group, answers: answers)
     }
-    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     if let button = statusItem.button {
-      button.image = nil
-      button.title = "ax"
-      button.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+      button.title = ""
+      button.image = MenuBarIcon.axe
+      button.imagePosition = .imageOnly
       button.setAccessibilityLabel("ax")
       button.toolTip = "Click to toggle conversations · Right-click for options"
       button.target = self
@@ -38,12 +38,6 @@ import Foundation
     statusSubscription = store.$snapshot.sink { [weak self] snapshot in
       guard let button = self?.statusItem.button else { return }
       let pending = snapshot.conversations.contains(where: \.needsAttention)
-      button.attributedTitle = NSAttributedString(
-        string: "ax",
-        attributes: [
-          .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .medium),
-          .foregroundColor: pending ? NSColor.systemOrange : NSColor.labelColor,
-        ])
       button.setAccessibilityLabel(pending ? "ax, question waiting" : "ax")
       button.toolTip =
         pending

@@ -4,6 +4,17 @@ import SwiftUI
 
 private final class ExpansionState: ObservableObject {
   @Published var expanded: Set<String> = []
+  @Published private var heights: [String: [Bool: CGFloat]] = [:]
+
+  func record(_ height: CGFloat, expanded: Bool, id: String) {
+    guard abs((heights[id]?[expanded] ?? -1) - height) > 0.5 else { return }
+    heights[id, default: [:]][expanded] = height
+  }
+
+  func overflows(_ id: String) -> Bool {
+    guard let full = heights[id]?[true], let preview = heights[id]?[false] else { return false }
+    return full > preview + 0.5
+  }
 }
 
 public struct ConversationsView: View {
@@ -105,18 +116,18 @@ public struct ConversationsView: View {
         if conversation.needsAttention {
           Circle().fill(.orange).frame(width: 6, height: 6).padding(.top, 5)
         }
-        MarkdownUpdateView(
-          document: document, expanded: presentation.expanded.contains(conversation.id),
-          compact: compact, featured: featured, palette: palette
-        )
-        .foregroundStyle(conversation.latestUpdate.isEmpty ? palette.secondary : palette.foreground)
+        update(document, conversation: conversation, featured: featured, palette: palette)
+          .foregroundStyle(
+            conversation.latestUpdate.isEmpty ? palette.secondary : palette.foreground)
       }
-      ForEach(conversation.questions ?? []) { group in
+      if let groups = conversation.questions, !groups.isEmpty {
         QuestionForm(
-          conversation: conversation, group: group, palette: palette,
+          conversation: conversation, groups: groups, palette: palette,
           answer: snapshot.isDemo ? nil : answer, open: open, preview: snapshot.isDemo)
       }
-      if !compact, document.blocks.count > 1 || document.source.count > (featured ? 160 : 80) {
+      if !compact,
+        presentation.expanded.contains(conversation.id) || presentation.overflows(conversation.id)
+      {
         Button(presentation.expanded.contains(conversation.id) ? "Less" : "More") {
           if presentation.expanded.contains(conversation.id) {
             presentation.expanded.remove(conversation.id)
@@ -127,6 +138,40 @@ public struct ConversationsView: View {
           .accessibilityLabel(
             "\(presentation.expanded.contains(conversation.id) ? "Collapse" : "Read full") update for \(conversation.title)"
           )
+      }
+    }
+  }
+
+  private func update(
+    _ document: MarkdownDocument, conversation: Conversation, featured: Bool, palette: Palette
+  ) -> some View {
+    let expanded = presentation.expanded.contains(conversation.id)
+    return measuredUpdate(
+      document, expanded: expanded, id: conversation.id,
+      featured: featured, palette: palette
+    )
+    .overlay(alignment: .topLeading) {
+      // Measure the same text at the same width, without changing the visible layout.
+      measuredUpdate(
+        document, expanded: !expanded, id: conversation.id,
+        featured: featured, palette: palette
+      )
+      .hidden().allowsHitTesting(false).accessibilityHidden(true)
+    }
+  }
+
+  private func measuredUpdate(
+    _ document: MarkdownDocument, expanded: Bool, id: String, featured: Bool, palette: Palette
+  ) -> some View {
+    MarkdownUpdateView(
+      document: document, expanded: expanded,
+      compact: compact, featured: featured, palette: palette
+    )
+    .background {
+      GeometryReader { geometry in
+        Color.clear.onChange(of: geometry.size.height, initial: true) { _, height in
+          DispatchQueue.main.async { presentation.record(height, expanded: expanded, id: id) }
+        }
       }
     }
   }
@@ -194,22 +239,22 @@ public struct PanelContent: View {
       ZStack {
         Capsule().fill(palette.secondary.opacity(0.35)).frame(width: 21, height: 3)
         HStack {
-          Button {
-            toggleFloating?()
-          } label: {
-            Image(systemName: keepFloating ? "pin.fill" : "pin").font(.system(size: 10))
-          }.buttonStyle(.plain).foregroundStyle(keepFloating ? palette.blue : palette.secondary)
-            .disabled(toggleFloating == nil)
-            .accessibilityLabel(
-              keepFloating ? "Stop keeping the widget floating" : "Keep widget floating when closed"
-            )
-            .help("Keep floating when closed")
           Spacer()
           Button(action: collapse) { Image(systemName: "chevron.down").font(.system(size: 10)) }
             .buttonStyle(.plain).foregroundStyle(palette.secondary).help("Collapse · Esc")
         }
       }.frame(height: 16).padding(.horizontal, 12)
       HStack(spacing: 14) {
+        Button {
+          toggleFloating?()
+        } label: {
+          Image(systemName: keepFloating ? "pin.fill" : "pin").font(.system(size: 11))
+        }.buttonStyle(.plain).foregroundStyle(keepFloating ? palette.blue : palette.secondary)
+          .disabled(toggleFloating == nil)
+          .accessibilityLabel(
+            keepFloating ? "Stop keeping the widget floating" : "Keep widget floating when closed"
+          )
+          .help("Keep floating when closed")
         ForEach(Provider.allCases) { provider in
           Button {
             newConversation?(provider)

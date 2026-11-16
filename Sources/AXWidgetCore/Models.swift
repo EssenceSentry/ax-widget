@@ -232,7 +232,15 @@ public struct Snapshot: Codable, Equatable, Sendable {
                     AgentQuestionOption(
                       label: "The question one", description: "Invite the viewer to think."),
                   ],
-                  multiple: false, allowsText: true, secret: false)
+                  multiple: false, allowsText: true, secret: false),
+                AgentQuestion(
+                  id: "length", index: 1, title: "How long should the reel be?", header: "Length",
+                  options: [
+                    AgentQuestionOption(label: "30 seconds", description: "Keep it brief."),
+                    AgentQuestionOption(
+                      label: "60 seconds", description: "Allow room for the example."),
+                  ],
+                  multiple: false, allowsText: true, secret: false),
               ])
           ]),
       ], isDemo: true)
