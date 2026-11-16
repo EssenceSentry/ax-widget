@@ -8,7 +8,7 @@ import SwiftUI
     _ = NSApplication.shared
     let output = URL(fileURLWithPath: CommandLine.arguments.dropFirst().first ?? "build/previews")
     try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-    for appearance in [Appearance.carbon, .porcelain] {
+    for appearance in [Appearance.carbon, .porcelain, .frost] {
       var snapshot = Snapshot.demo()
       snapshot.appearance = appearance
       let palette = Palette(appearance, scheme: appearance == .carbon ? .dark : .light)
@@ -39,12 +39,13 @@ import SwiftUI
         .padding(18).foregroundStyle(palette.foreground).background(palette.background),
         width: 420, to: output.appendingPathComponent("\(appearance.rawValue)-markdown.png"))
       try render(
-        CollapsedView(snapshot: snapshot).padding(12).background(palette.background),
+        CollapsedView(snapshot: snapshot, nativeEffects: false).padding(12).background(
+          palette.background),
         width: 120, height: 72,
         to: output.appendingPathComponent("\(appearance.rawValue)-collapsed.png"))
       try render(
         VStack(alignment: .trailing, spacing: 8) {
-          CollapsedView(snapshot: snapshot)
+          CollapsedView(snapshot: snapshot, nativeEffects: false)
           PanelContent(snapshot: snapshot, nativeEffects: false, collapse: {}, open: { _ in })
         },
         width: 420,
@@ -66,7 +67,7 @@ import SwiftUI
       }
     }
     print(
-      "Rendered Carbon and Porcelain floating, usage-widget, and Markdown previews to \(output.path)"
+      "Rendered Carbon, Porcelain, and Frost floating, usage-widget, and Markdown previews to \(output.path)"
     )
   }
 

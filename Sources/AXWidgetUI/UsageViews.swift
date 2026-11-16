@@ -56,7 +56,7 @@ public struct ProviderGauge: View {
   }
   public var body: some View {
     ZStack {
-      Circle().fill(palette.background.opacity(0.88))
+      Circle().fill(palette.background.opacity(palette.frost ? 0.55 : 0.88))
       if provider == .codex {
         ring(snapshot.codex, color: palette.blue, inset: 2)
       } else {
@@ -111,8 +111,13 @@ public struct ProviderGauge: View {
 
 public struct CollapsedView: View {
   public var snapshot: Snapshot
+  public var nativeEffects: Bool
   @Environment(\.colorScheme) private var scheme
-  public init(snapshot: Snapshot) { self.snapshot = snapshot }
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  public init(snapshot: Snapshot, nativeEffects: Bool = true) {
+    self.snapshot = snapshot
+    self.nativeEffects = nativeEffects
+  }
   public var body: some View {
     let palette = Palette(snapshot.appearance, scheme: scheme)
     HStack(spacing: 8) {
@@ -123,7 +128,19 @@ public struct CollapsedView: View {
             $0.provider == provider && $0.needsAttention
           })
       }
-    }.padding(4).background(palette.background.opacity(0.25), in: Capsule())
+    }.padding(4)
+      .background {
+        if palette.frost {
+          ZStack {
+            if nativeEffects { NativeMaterial(appearance: snapshot.appearance) }
+            palette.background.opacity(
+              reduceTransparency || !nativeEffects ? 1 : palette.surfaceOpacity)
+          }.clipShape(Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.7), lineWidth: 0.7))
+        } else {
+          Capsule().fill(palette.background.opacity(0.25))
+        }
+      }
       .preferredColorScheme(snapshot.appearance.colorScheme)
   }
 }

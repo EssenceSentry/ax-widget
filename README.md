@@ -5,8 +5,10 @@ Keep Claude and Codex allowance visible in two tiny floating rings. Click to
 expand recent conversations, their latest agent-written update, and task progress.
 Click a conversation title to open that exact chat in its native desktop app.
 
-**Carbon** and **Porcelain** share the same layout and follow system appearance
-by default. Both the floating interface and a small native Notification Center widget
+**Carbon**, **Porcelain**, and **Frost** share the same layout. System appearance
+is the default; choose a theme from the menu-bar icon's **Appearance** submenu.
+Frost uses cool glass with native background blur and slate text; it becomes
+opaque when macOS Reduce Transparency is enabled. Both the floating interface and a small native Notification Center widget
 are included. There is no brand/count header and no built-in chat editor.
 
 ## Floating mode
@@ -112,7 +114,7 @@ swift run AXWidgetRender build/previews
 ```
 
 Demo mode is labeled, never opens synthetic conversations, and never overwrites
-the live widget snapshot. The renderer produces native SwiftUI previews of both
+the live widget snapshot. The renderer produces native SwiftUI previews of all three
 appearances in the floating and small-widget layouts, plus a Markdown sample;
 these are not evidence of system-widget hosting.
 

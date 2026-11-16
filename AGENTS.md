@@ -4,7 +4,7 @@ Native macOS SwiftUI/AppKit app and WidgetKit extension. Keep ax itself UI-agnos
 Work in this repository's main checkout. Do not launch agents or delegate unless the
 user explicitly agrees on their number, model, and reasoning effort.
 
-Carbon and Porcelain are the only appearance variants. Preserve the approved Focus
+Carbon, Porcelain, and Frost are the appearance variants, with System as the default. Preserve the approved Focus
 layout in docs/design: no brand/count header, latest agent-written prose, tiny
 provider usage rings (one Codex, inner Claude five-hour and outer weekly), native
 conversation links, one small fixed-size system usage widget, and no notification service.

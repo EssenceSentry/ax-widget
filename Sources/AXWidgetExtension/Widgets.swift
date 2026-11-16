@@ -41,7 +41,18 @@ struct UsageWidget: Widget {
 private struct WidgetBackground: View {
   let appearance: Appearance
   @Environment(\.colorScheme) private var scheme
-  var body: some View { Palette(appearance, scheme: scheme).background }
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+  var body: some View {
+    let palette = Palette(appearance, scheme: scheme)
+    ZStack {
+      if palette.frost && !reduceTransparency {
+        Rectangle().fill(.ultraThinMaterial)
+        palette.background.opacity(0.55)
+      } else {
+        palette.background
+      }
+    }.preferredColorScheme(appearance.colorScheme)
+  }
 }
 
 @main struct AXWidgets: WidgetBundle {

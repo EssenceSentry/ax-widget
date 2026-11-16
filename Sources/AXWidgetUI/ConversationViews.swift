@@ -218,6 +218,7 @@ public struct PanelContent: View {
   public var newConversation: ((Provider) -> Void)?
   public var answer: QuestionAnswerHandler?
   @Environment(\.colorScheme) private var scheme
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   public init(
     snapshot: Snapshot, nativeEffects: Bool = true, heightChanged: ((CGFloat) -> Void)? = nil,
     keepFloating: Bool = false, toggleFloating: (() -> Void)? = nil,
@@ -299,7 +300,8 @@ public struct PanelContent: View {
     }
     .background {
       if nativeEffects {
-        NativeMaterial().overlay(palette.background.opacity(0.88))
+        NativeMaterial(appearance: snapshot.appearance)
+          .overlay(palette.background.opacity(reduceTransparency ? 1 : palette.surfaceOpacity))
       } else {
         palette.background
       }

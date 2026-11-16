@@ -20,7 +20,7 @@ public enum Provider: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 public enum Appearance: String, Codable, CaseIterable, Identifiable, Sendable {
-  case system, carbon, porcelain
+  case system, carbon, porcelain, frost
   public var id: String { rawValue }
   public var label: String { rawValue.capitalized }
 }
