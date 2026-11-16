@@ -13,9 +13,14 @@ private final class UtilityPanel: NSPanel {
 private final class CollapsedHost: NSHostingView<CollapsedView> {
   var clicked: (() -> Void)?
   var moved: (() -> Void)?
+  var hasGroup = false
   override var acceptsFirstResponder: Bool { true }
   override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
   override func mouseDown(with event: NSEvent) {
+    if hasGroup && convert(event.locationInWindow, from: nil).x >= 96 {
+      super.mouseDown(with: event)
+      return
+    }
     guard let window else { return }
     while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
       if next.type == .leftMouseDragged {
@@ -46,6 +51,12 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   var openConversation: ((Conversation) -> Void)?
   var newConversation: ((Provider) -> Void)?
   var answerQuestion: QuestionAnswerHandler?
+  var toggleConversationPin: ((Conversation) -> Void)?
+  var showGroup: (() -> Void)?
+  var minimizeGroup: (() -> Void)?
+  var arrangeGroup: (() -> Void)?
+  var groupScreen: NSScreen? { panel.screen }
+  private var pillWidth: CGFloat { store.group.pins.isEmpty ? 96 : 128 }
   var isTriggerClick: ((NSPoint) -> Bool)?
 
   init(store: AppStore) {
@@ -136,19 +147,33 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     let screen =
       panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
       ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-    collapsedOrigin.x = min(max(collapsedOrigin.x, screen.minX + 8), screen.maxX - 104)
+    collapsedOrigin.x = min(max(collapsedOrigin.x, screen.minX + 8), screen.maxX - pillWidth - 8)
     collapsedOrigin.y = min(max(collapsedOrigin.y, screen.minY + 8), screen.maxY - 56)
     panel.setFrame(
-      NSRect(origin: collapsedOrigin, size: NSSize(width: 96, height: 48)), display: true)
+      NSRect(origin: collapsedOrigin, size: NSSize(width: pillWidth, height: 48)), display: true)
     update(store.snapshot)
     applyVisibility()
   }
 
   private func update(_ snapshot: Snapshot) {
+    if panel.frame.width != pillWidth {
+      var frame = panel.frame
+      frame.origin.x += frame.width - pillWidth
+      frame.size.width = pillWidth
+      panel.setFrame(frame, display: true)
+      collapsedOrigin.x = frame.minX
+    }
+    let root = CollapsedView(
+      snapshot: snapshot,
+      showGroup: { [weak self] in self?.showGroup?() },
+      minimizeGroup: { [weak self] in self?.minimizeGroup?() },
+      arrangeGroup: { [weak self] in self?.arrangeGroup?() })
     if let host = panel.contentView as? CollapsedHost {
-      host.rootView = CollapsedView(snapshot: snapshot)
+      host.rootView = root
+      host.hasGroup = !store.group.pins.isEmpty
     } else {
-      let host = CollapsedHost(rootView: CollapsedView(snapshot: snapshot))
+      let host = CollapsedHost(rootView: root)
+      host.hasGroup = !store.group.pins.isEmpty
       host.clicked = { [weak self] in
         guard let self else { return }
         if self.expanded { self.collapse() } else { self.expand() }
@@ -175,6 +200,10 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
       },
       newConversation: { [weak self] provider in self?.newConversation?(provider) },
       answer: answerQuestion,
+      togglePin: { [weak self] in self?.toggleConversationPin?($0) },
+      showGroup: { [weak self] in self?.showGroup?() },
+      minimizeGroup: { [weak self] in self?.minimizeGroup?() },
+      arrangeGroup: { [weak self] in self?.arrangeGroup?() },
       collapse: { [weak self] in self?.collapse() },
       open: { [weak self] conversation in
         self?.openConversation?(conversation)

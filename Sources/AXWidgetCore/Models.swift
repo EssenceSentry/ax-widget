@@ -182,6 +182,8 @@ public struct Snapshot: Codable, Equatable, Sendable {
   public var issues: [String]
   public var appearance: Appearance
   public var isDemo: Bool
+  public var pinnedConversationIDs: [String]?
+  public var windowGroupBusy: Bool?
 
   public init(
     generated: Date = Date(), allowances: [Allowance] = [], conversations: [Conversation] = [],

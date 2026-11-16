@@ -11,11 +11,19 @@ import Foundation
   private var pendingURLs: [URL] = []
   private var answering = false
   private var statusSubscription: AnyCancellable?
+  private let conversationWindows = ConversationWindows()
+  private var groupOperation = false {
+    didSet { store.setGroupBusy(groupOperation) }
+  }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     floating = FloatingController(store: store)
     floating.openConversation = { [weak self] conversation in self?.open(conversation) }
     floating.newConversation = { [weak self] provider in self?.startConversation(provider) }
+    floating.toggleConversationPin = { [weak self] in self?.togglePin($0) }
+    floating.showGroup = { [weak self] in self?.showConversationGroup() }
+    floating.minimizeGroup = { [weak self] in self?.minimizeConversationGroup() }
+    floating.arrangeGroup = { [weak self] in self?.showConversationGroup(arrange: true) }
     floating.answerQuestion = { [weak self] conversation, group, answers in
       guard let self else { return "AX Widget is unavailable." }
       return await self.answer(conversation, group: group, answers: answers)
@@ -68,13 +76,32 @@ import Foundation
     let entry = menu.addItem(withTitle: "Appearance", action: nil, keyEquivalent: "")
     entry.submenu = appearance
     menu.addItem(.separator())
+    if !store.group.pins.isEmpty {
+      for (title, action) in [
+        ("Show conversation group", #selector(showGroupMenu)),
+        ("Minimize conversation group", #selector(minimizeGroupMenu)),
+        ("Arrange conversations side by side", #selector(arrangeGroupMenu)),
+      ] {
+        menu.addItem(withTitle: title, action: action, keyEquivalent: "").target = self
+      }
+      let pins = NSMenu()
+      for pin in store.group.pins {
+        let item = pins.addItem(
+          withTitle: "Unpin \(pin.title)", action: #selector(unpinMenu(_:)), keyEquivalent: "")
+        item.target = self
+        item.representedObject = pin.id
+      }
+      menu.addItem(withTitle: "Pinned conversations", action: nil, keyEquivalent: "").submenu = pins
+      menu.addItem(.separator())
+    }
     let widgets = menu.addItem(
       withTitle: "Add Usage Widget…", action: #selector(showWidgetHelp),
       keyEquivalent: "")
     widgets.target = self
     if !ClaudeQuestionClient.isTrusted {
       let replies = menu.addItem(
-        withTitle: "Enable Claude replies…", action: #selector(enableClaudeReplies),
+        withTitle: "Enable window control and Claude replies…",
+        action: #selector(enableClaudeReplies),
         keyEquivalent: "")
       replies.target = self
     }
@@ -108,6 +135,79 @@ import Foundation
     }
   }
   @objc private func refresh() { store.refresh(forceUsage: true) }
+  @objc private func showGroupMenu() { showConversationGroup() }
+  @objc private func minimizeGroupMenu() { minimizeConversationGroup() }
+  @objc private func arrangeGroupMenu() { showConversationGroup(arrange: true) }
+  @objc private func unpinMenu(_ item: NSMenuItem) {
+    guard let id = item.representedObject as? String,
+      let pin = store.group.pins.first(where: { $0.id == id })
+    else { return }
+    togglePin(pin.conversation)
+  }
+
+  private func togglePin(_ conversation: Conversation) {
+    guard !store.demo, !groupOperation else { return }
+    var group = store.group
+    if group.pins.contains(where: { $0.id == conversation.id }) {
+      group.remove(conversation.id)
+      conversationWindows.forget(conversation.id)
+      store.setGroup(group)
+      store.reportGroupError(nil)
+      if !group.pins.isEmpty { showConversationGroup(arrange: true) }
+    } else {
+      do {
+        try group.add(conversation)
+        groupOperation = true
+        Task {
+          defer { groupOperation = false }
+          do {
+            try await conversationWindows.show(
+              group.pins, screen: floating.groupScreen,
+              arrange: true, newlyPinnedID: conversation.id)
+            store.setGroup(group)
+            store.reportGroupError(nil)
+            floating.collapse()
+          } catch {
+            conversationWindows.forget(conversation.id)
+            store.reportGroupError(error)
+            floating.expand()
+            if !ClaudeQuestionClient.isTrusted { enableClaudeReplies() }
+          }
+        }
+      } catch { store.reportGroupError(error) }
+    }
+  }
+
+  private func showConversationGroup(arrange: Bool = false, newlyPinnedID: String? = nil) {
+    guard !store.demo, !groupOperation else { return }
+    groupOperation = true
+    Task {
+      defer { groupOperation = false }
+      do {
+        try await conversationWindows.show(
+          store.group.pins, screen: floating.groupScreen,
+          arrange: arrange, newlyPinnedID: newlyPinnedID)
+        store.reportGroupError(nil)
+        floating.collapse()
+      } catch {
+        store.reportGroupError(error)
+        floating.expand()
+        if !ClaudeQuestionClient.isTrusted { enableClaudeReplies() }
+      }
+    }
+  }
+
+  private func minimizeConversationGroup() {
+    guard !store.demo, !groupOperation else { return }
+    do {
+      try conversationWindows.minimize(store.group.pins)
+      store.reportGroupError(nil)
+      floating.collapse()
+    } catch {
+      store.reportGroupError(error)
+      floating.expand()
+    }
+  }
   @objc private func enableClaudeReplies() {
     guard !ClaudeQuestionClient.requestAccessibility(),
       let settings = URL(
@@ -238,6 +338,16 @@ import Foundation
         enableClaudeReplies()
         continue
       }
+      if url.host == "group" {
+        let action = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+          .first { $0.name == "action" }?.value
+        if action == "minimize" {
+          minimizeConversationGroup()
+        } else {
+          showConversationGroup(arrange: action == "arrange")
+        }
+        continue
+      }
       let parts = url.pathComponents.filter { $0 != "/" }
       guard url.host == "conversation", parts.count == 2, UUID(uuidString: parts[1]) != nil,
         let provider = Provider(rawValue: parts[0])
@@ -254,6 +364,41 @@ import Foundation
 
 @main enum Main {
   @MainActor static func main() {
+    if let index = CommandLine.arguments.firstIndex(of: "--verify-window-group") {
+      let ids = Array(CommandLine.arguments.dropFirst(index + 1))
+      let recent = LocalRepository().conversations(limit: 40).items
+      let pins = ids.compactMap { id in recent.first { $0.id == id }.map(ConversationPin.init) }
+      guard !pins.isEmpty, pins.count == ids.count, pins.count <= 3,
+        Set(ids).count == ids.count
+      else {
+        FileHandle.standardOutput.write(
+          Data("{\"error\":\"Pass one to three distinct recent provider:session IDs.\"}".utf8))
+        return
+      }
+      let app = NSApplication.shared
+      app.setActivationPolicy(.accessory)
+      Task {
+        let client = ConversationWindows()
+        var report: [String: Any]
+        do { report = try await client.verify(pins) } catch {
+          report = ["error": error.localizedDescription]
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: report) {
+          FileHandle.standardOutput.write(data)
+        }
+        app.terminate(nil)
+      }
+      app.run()
+      return
+    }
+    if CommandLine.arguments.contains("--window-diagnostics") {
+      let data = try? JSONSerialization.data(withJSONObject: [
+        "accessibilityTrusted": ClaudeQuestionClient.isTrusted,
+        "providers": WindowAX.diagnostics(),
+      ])
+      if let data { FileHandle.standardOutput.write(data) }
+      return
+    }
     if CommandLine.arguments.contains("--accessibility-status") {
       let data = try? JSONSerialization.data(withJSONObject: [
         "accessibilityTrusted": ClaudeQuestionClient.isTrusted

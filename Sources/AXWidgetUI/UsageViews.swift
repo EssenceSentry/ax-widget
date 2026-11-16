@@ -104,10 +104,19 @@ public struct ProviderGauge: View {
 public struct CollapsedView: View {
   public var snapshot: Snapshot
   public var nativeEffects: Bool
+  public var showGroup: (() -> Void)?
+  public var minimizeGroup: (() -> Void)?
+  public var arrangeGroup: (() -> Void)?
   @Environment(\.colorScheme) private var scheme
-  public init(snapshot: Snapshot, nativeEffects: Bool = true) {
+  public init(
+    snapshot: Snapshot, nativeEffects: Bool = true, showGroup: (() -> Void)? = nil,
+    minimizeGroup: (() -> Void)? = nil, arrangeGroup: (() -> Void)? = nil
+  ) {
     self.snapshot = snapshot
     self.nativeEffects = nativeEffects
+    self.showGroup = showGroup
+    self.minimizeGroup = minimizeGroup
+    self.arrangeGroup = arrangeGroup
   }
   public var body: some View {
     let palette = Palette(snapshot.appearance, scheme: scheme)
@@ -118,6 +127,20 @@ public struct CollapsedView: View {
           attention: snapshot.conversations.contains {
             $0.provider == provider && $0.needsAttention
           })
+      }
+      if snapshot.pinnedConversationIDs?.isEmpty == false {
+        Button {
+          showGroup?()
+        } label: {
+          Image(systemName: "rectangle.on.rectangle").font(.system(size: 13, weight: .medium))
+            .foregroundStyle(palette.foreground).frame(width: 24, height: 40)
+        }.buttonStyle(.plain).help("Bring all pinned conversations forward")
+          .accessibilityLabel("Show conversation group")
+          .contextMenu {
+            Button("Show group") { showGroup?() }
+            Button("Minimize group") { minimizeGroup?() }
+            Button("Arrange side by side") { arrangeGroup?() }
+          }
       }
     }.padding(4)
       .background {

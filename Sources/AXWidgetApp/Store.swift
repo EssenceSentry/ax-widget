@@ -20,6 +20,29 @@ import WidgetKit
   private var fileSubscription: AnyCancellable?
   private var transcriptMonitor: TranscriptMonitor?
   let demo: Bool
+  private(set) var group: ConversationGroup
+  private var groupIssue: String?
+  private var groupBusy = false
+  func setGroupBusy(_ busy: Bool) {
+    groupBusy = busy
+    snapshot.windowGroupBusy = busy
+  }
+
+  func setGroup(_ value: ConversationGroup) {
+    group = value
+    if !demo, let data = try? JSONEncoder().encode(value.pins) {
+      UserDefaults.standard.set(data, forKey: "conversationPins")
+    }
+    snapshot.pinnedConversationIDs = group.pins.map(\.id)
+    snapshot.conversations = group.ordered(snapshot.conversations, limit: 8)
+    refresh()
+  }
+
+  func reportGroupError(_ error: Error?) {
+    if let previous = groupIssue { snapshot.issues.removeAll { $0 == previous } }
+    groupIssue = error?.localizedDescription
+    if let groupIssue { snapshot.issues.insert(groupIssue, at: 0) }
+  }
 
   var appearance: Appearance {
     get {
@@ -35,7 +58,12 @@ import WidgetKit
 
   init(demo: Bool) {
     self.demo = demo
+    let pins =
+      UserDefaults.standard.data(forKey: "conversationPins")
+      .flatMap { try? JSONDecoder().decode([ConversationPin].self, from: $0) } ?? []
+    group = ConversationGroup(pins: demo ? [] : pins)
     snapshot = demo ? .demo() : SnapshotStore.read()
+    snapshot.pinnedConversationIDs = group.pins.map(\.id)
     snapshot.appearance =
       Appearance(rawValue: UserDefaults.standard.string(forKey: "appearance") ?? "system")
       ?? .system
@@ -68,14 +96,18 @@ import WidgetKit
       return
     }
     refreshing = true
+    let pins = group.pins
     queue.async { [weak self] in
-      let (conversations, issues) = LocalRepository().conversations(limit: 6)
+      let (conversations, issues) = LocalRepository().conversations(limit: 8, pins: pins)
       Task { @MainActor in
         guard let self else { return }
         self.refreshing = false
-        let result = Snapshot(
+        var result = Snapshot(
           allowances: self.usage, conversations: conversations,
-          issues: issues + [self.usageIssue].compactMap { $0 }, appearance: self.appearance)
+          issues: [self.groupIssue].compactMap { $0 } + issues
+            + [self.usageIssue].compactMap { $0 }, appearance: self.appearance)
+        result.pinnedConversationIDs = self.group.pins.map(\.id)
+        result.windowGroupBusy = self.groupBusy
         let oldQuestions = Set(self.snapshot.conversations.filter(\.needsAttention).map(\.id))
         let newQuestions = Set(result.conversations.filter(\.needsAttention).map(\.id))
         self.snapshot = result

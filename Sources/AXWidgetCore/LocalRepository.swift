@@ -19,11 +19,16 @@ public struct LocalRepository {
   public var paths: LocalPaths
   public init(paths: LocalPaths = LocalPaths()) { self.paths = paths }
 
-  public func conversations(limit: Int = 8, at date: Date = Date()) -> (
-    items: [Conversation], issues: [String]
-  ) {
+  public func conversations(limit: Int = 8, at date: Date = Date(), pins: [ConversationPin] = [])
+    -> (
+      items: [Conversation], issues: [String]
+    )
+  {
     let cutoff = date.addingTimeInterval(-12 * 3600)
     var found: [String: Conversation] = [:]
+    let group = ConversationGroup(pins: pins)
+    let pinnedIDs = Set(group.pins.map(\.id))
+    for pin in group.pins { found[pin.id] = pin.conversation }
     var issues: [String] = []
     var excluded: Set<String> = []
     let catalog = paths.axData.appendingPathComponent("catalog.sqlite3")
@@ -58,9 +63,18 @@ public struct LocalRepository {
         for archived in try db.rows("SELECT id FROM threads WHERE archived=1") {
           if let id = archived["id"] { excluded.insert("codex:" + id) }
         }
+        let selectedPins = group.pins.filter { $0.provider == .codex }.map(\.sessionID)
+        let pinnedRows =
+          selectedPins.isEmpty
+          ? []
+          : try db.rows(
+            "SELECT id,title,cwd,rollout_path,updated_at,archived" + extras
+              + " FROM threads WHERE id IN (" + selectedPins.map { _ in "?" }.joined(separator: ",")
+              + ")",
+            strings: selectedPins)
         for row in try db.rows(
           "SELECT id,title,cwd,rollout_path,updated_at,archived" + extras
-            + " FROM threads ORDER BY updated_at DESC LIMIT 60")
+            + " FROM threads ORDER BY updated_at DESC LIMIT 60") + pinnedRows
         {
           guard let id = row["id"], UUID(uuidString: id) != nil else { continue }
           let key = "codex:\(id)"
@@ -138,14 +152,18 @@ public struct LocalRepository {
     // Filter SDK workers before limiting candidates: many recent worker sessions
     // must not crowd older, real conversations out of the widget.
     let candidates = found.values.filter { item in
-      guard !excluded.contains(item.id), item.updated >= cutoff else { return false }
+      guard !excluded.contains(item.id), item.updated >= cutoff || pinnedIDs.contains(item.id)
+      else { return false }
       return item.source.map {
         TranscriptReader.isMainConversation(
           URL(fileURLWithPath: $0), registeredDesktop: item.desktopSessionID != nil)
       }
         ?? true
     }
-    .sorted { $0.updated > $1.updated }.prefix(24)
+    .sorted {
+      if pinnedIDs.contains($0.id) != pinnedIDs.contains($1.id) { return pinnedIDs.contains($0.id) }
+      return $0.updated > $1.updated
+    }.prefix(24)
     var items: [Conversation] = []
     for var item in candidates {
       item.progress = progress[item.id]
@@ -164,8 +182,7 @@ public struct LocalRepository {
       }
       items.append(item)
     }
-    items.sort { $0.updated > $1.updated }
-    return (Array(items.prefix(limit)), issues)
+    return (group.ordered(items, limit: limit), issues)
   }
 
   private func desktopRecords() -> [[String: Any]] {

@@ -54,6 +54,15 @@ import SwiftUI
         SmallUsageWidget(snapshot: snapshot).padding(14).background(palette.background),
         width: 170, height: 170,
         to: output.appendingPathComponent("\(appearance.rawValue)-usage-widget.png"))
+      var group = snapshot
+      group.pinnedConversationIDs = Array(snapshot.conversations.prefix(2).map(\.id))
+      try render(
+        VStack(alignment: .trailing, spacing: 8) {
+          CollapsedView(snapshot: group, nativeEffects: false)
+          PanelContent(
+            snapshot: group, nativeEffects: false, togglePin: { _ in },
+            showGroup: {}, minimizeGroup: {}, arrangeGroup: {}, collapse: {}, open: { _ in })
+        }, width: 420, to: output.appendingPathComponent("\(appearance.rawValue)-group.png"))
       for status in ["full", "unavailable", "cached"] {
         var variant = snapshot
         for index in variant.allowances.indices {

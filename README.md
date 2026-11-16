@@ -29,6 +29,7 @@ are included. There is no brand/count header and no built-in chat editor.
   Escape to close, or click the menu-bar icon again. The position is remembered
   and constrained to the screen.
 - Conversations are sorted by most recent activity, limited to the last 12 hours.
+  Pinned conversations remain first, in pin order, even after 12 hours.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. **More** appears only when the rendered preview actually
   clips content, and expands the text in place. The panel grows and shrinks
@@ -57,7 +58,7 @@ are included. There is no brand/count header and no built-in chat editor.
   installed client handles question submission inside its renderer. AX Widget
   matches the original question and submit control; ambiguous forms stay unanswered.
   Without this permission, **Open Claude** remains available.
-  Choose **Enable Claude replies…** from the menu-bar menu or the question form
+  Choose **Enable window control and Claude replies…** from the menu-bar menu or the question form
   to request access, then enable **AX Widget** in macOS Accessibility settings.
   Background refresh never requests permission. Answers submitted in Claude
   clear from the widget when its native tool-result record is saved.
@@ -70,6 +71,34 @@ are included. There is no brand/count header and no built-in chat editor.
   vector artwork; OpenAI adapts to the selected appearance.
 - The menu-bar icon is a pure-white axe silhouette. Right-click it to control Keep floating,
   appearance, refresh, and quit.
+
+## Conversation window group
+
+Pin up to three conversations using the pin beside each title. Each pin opens
+that exact conversation in its own native Claude or Codex window and arranges the
+group side by side on the widget's display. The separate toolbar pin still means
+**Keep floating**; it does not pin a conversation.
+
+- **Show group** (overlapping rectangles) restores and raises all pinned windows
+  with one click. It is available in the expanded panel, the floating pill when
+  enabled, and the menu-bar menu. Switch to Slack or any other app normally;
+  click Show group when you want all the conversations back.
+- **Minimize group** minimizes only the pinned windows. Other windows belonging
+  to Claude and Codex are left alone.
+- **Arrange side by side** is in the group button's context menu and menu-bar
+  menu. Normal Show group preserves any positions and sizes you adjust manually.
+  Pin changes arrange the group again. If the apps' minimum window sizes do not
+  fit, the previous frames are restored and the panel explains the problem.
+- Unpinning leaves the conversation open and removes it from group control.
+  Pin references survive widget restarts; restoring them never launches provider
+  apps until you request Show group. No chat contents are stored in preferences.
+
+These are ordinary app windows, without an always-on-top level. Group control
+requires macOS Accessibility access for AX Widget. It uses native conversation
+navigation and Open in New Window actions; it sends no prompts, creates no
+conversations, and does not interrupt running agents. Ambiguous or unavailable
+window targets produce an error rather than selecting another conversation.
+Use ordinary desktop windows on one display; leave full screen before arranging.
 
 ## Notification Center and desktop widget
 

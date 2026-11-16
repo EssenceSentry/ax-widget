@@ -23,19 +23,21 @@ public struct ConversationsView: View {
   public var staticPreview: Bool
   public var open: ((Conversation) -> Void)?
   public var answer: QuestionAnswerHandler?
+  public var togglePin: ((Conversation) -> Void)?
   @Environment(\.colorScheme) private var scheme
   @StateObject private var presentation = ExpansionState()
 
   public init(
     snapshot: Snapshot, compact: Bool = false, staticPreview: Bool = false,
     open: ((Conversation) -> Void)? = nil,
-    answer: QuestionAnswerHandler? = nil
+    answer: QuestionAnswerHandler? = nil, togglePin: ((Conversation) -> Void)? = nil
   ) {
     self.snapshot = snapshot
     self.compact = compact
     self.staticPreview = staticPreview
     self.open = open
     self.answer = answer
+    self.togglePin = togglePin
   }
 
   public var body: some View {
@@ -76,6 +78,21 @@ public struct ConversationsView: View {
     return VStack(alignment: .leading, spacing: compact ? 5 : 8) {
       HStack(alignment: .firstTextBaseline, spacing: 7) {
         title(conversation, palette: palette)
+        if let togglePin {
+          let pinned = snapshot.pinnedConversationIDs?.contains(conversation.id) == true
+          Button {
+            togglePin(conversation)
+          } label: {
+            Image(systemName: pinned ? "pin.fill" : "pin")
+              .font(.system(size: 10)).foregroundStyle(pinned ? palette.blue : palette.secondary)
+          }.buttonStyle(.plain).disabled(snapshot.isDemo || snapshot.windowGroupBusy == true)
+            .help(
+              pinned
+                ? "Remove from window group; leave the conversation open"
+                : "Pin conversation in a group of up to three windows"
+            )
+            .accessibilityLabel("\(pinned ? "Unpin" : "Pin") conversation: \(conversation.title)")
+        }
         if let count = conversation.progress?.runningCount, count > 0 {
           Label("\(count)", systemImage: "terminal")
             .font(.system(size: 10, weight: .medium)).foregroundStyle(palette.blue)
@@ -217,6 +234,10 @@ public struct PanelContent: View {
   public var toggleFloating: (() -> Void)?
   public var newConversation: ((Provider) -> Void)?
   public var answer: QuestionAnswerHandler?
+  public var togglePin: ((Conversation) -> Void)?
+  public var showGroup: (() -> Void)?
+  public var minimizeGroup: (() -> Void)?
+  public var arrangeGroup: (() -> Void)?
   @Environment(\.colorScheme) private var scheme
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   public init(
@@ -224,6 +245,9 @@ public struct PanelContent: View {
     keepFloating: Bool = false, toggleFloating: (() -> Void)? = nil,
     newConversation: ((Provider) -> Void)? = nil,
     answer: QuestionAnswerHandler? = nil,
+    togglePin: ((Conversation) -> Void)? = nil,
+    showGroup: (() -> Void)? = nil, minimizeGroup: (() -> Void)? = nil,
+    arrangeGroup: (() -> Void)? = nil,
     collapse: @escaping () -> Void,
     open: @escaping (Conversation) -> Void
   ) {
@@ -234,6 +258,10 @@ public struct PanelContent: View {
     self.toggleFloating = toggleFloating
     self.newConversation = newConversation
     self.answer = answer
+    self.togglePin = togglePin
+    self.showGroup = showGroup
+    self.minimizeGroup = minimizeGroup
+    self.arrangeGroup = arrangeGroup
     self.collapse = collapse
     self.open = open
   }
@@ -272,11 +300,36 @@ public struct PanelContent: View {
             .accessibilityLabel("Start a new \(provider.label) conversation")
         }
         Spacer(minLength: 0)
+        if snapshot.windowGroupBusy == true {
+          ProgressView().controlSize(.mini).help("Opening conversation windows…")
+        }
+        if snapshot.pinnedConversationIDs?.isEmpty == false {
+          Button {
+            showGroup?()
+          } label: {
+            Image(systemName: "rectangle.on.rectangle")
+          }
+          .buttonStyle(.plain).help("Show all pinned conversation windows")
+          .accessibilityLabel("Show conversation group")
+          .contextMenu {
+            Button("Show group") { showGroup?() }
+            Button("Minimize group") { minimizeGroup?() }
+            Button("Arrange side by side") { arrangeGroup?() }
+          }
+          Button {
+            minimizeGroup?()
+          } label: {
+            Image(systemName: "minus.square")
+          }
+          .buttonStyle(.plain).help("Minimize all pinned conversation windows")
+          .accessibilityLabel("Minimize conversation group")
+        }
       }.font(.system(size: 11, weight: .medium)).foregroundStyle(palette.secondary)
         .frame(height: 28).padding(.horizontal, 18)
       if nativeEffects {
         ScrollView {
-          ConversationsView(snapshot: snapshot, open: open, answer: answer).padding(.horizontal, 18)
+          ConversationsView(snapshot: snapshot, open: open, answer: answer, togglePin: togglePin)
+            .padding(.horizontal, 18)
             .padding(
               .top, 10
             ).padding(.bottom, 17)
@@ -291,10 +344,12 @@ public struct PanelContent: View {
             }
         }.scrollIndicators(.hidden)
       } else {
-        ConversationsView(snapshot: snapshot, staticPreview: true, open: open, answer: answer)
-          .padding(.horizontal, 18)
-          .padding(.top, 10)
-          .padding(.bottom, 17)
+        ConversationsView(
+          snapshot: snapshot, staticPreview: true, open: open, answer: answer, togglePin: togglePin
+        )
+        .padding(.horizontal, 18)
+        .padding(.top, 10)
+        .padding(.bottom, 17)
         Spacer(minLength: 0)
       }
     }
