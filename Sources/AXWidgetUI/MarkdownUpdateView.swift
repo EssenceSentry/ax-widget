@@ -27,7 +27,7 @@ public struct MarkdownUpdateView: View {
         blockView(block)
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
-      .font(.system(size: fontSize)).lineSpacing(compact ? 1 : 2)
+      .font(.system(size: fontSize, weight: .light)).lineSpacing(compact ? 1 : 2)
       .fixedSize(horizontal: false, vertical: true)
   }
 
@@ -36,11 +36,11 @@ public struct MarkdownUpdateView: View {
     case .table:
       table(block)
     case .heading(let level):
-      text(block.text).font(.system(size: fontSize + (level <= 2 ? 2 : 0), weight: .semibold))
+      text(block.text, size: fontSize + (level <= 2 ? 2 : 0), weight: .medium)
         .lineLimit(expanded ? nil : 1)
     case .code:
       Text(String(block.text.characters).trimmingCharacters(in: .newlines))
-        .font(.system(size: fontSize - 1, design: .monospaced))
+        .font(.system(size: fontSize - 1, weight: .light, design: .monospaced))
         .lineLimit(expanded ? nil : previewLines)
         .frame(maxWidth: .infinity, alignment: .leading).padding(8)
         .background(palette.track.opacity(0.45), in: RoundedRectangle(cornerRadius: 5))
@@ -59,10 +59,19 @@ public struct MarkdownUpdateView: View {
     }
   }
 
-  private func text(_ value: AttributedString) -> Text {
+  private func text(_ value: AttributedString, size: CGFloat? = nil, weight: Font.Weight = .light)
+    -> Text
+  {
     var formatted = value
-    for run in formatted.runs where run.inlinePresentationIntent?.contains(.code) == true {
-      formatted[run.range].font = .system(size: fontSize, design: .monospaced)
+    for run in value.runs {
+      var intent = run.inlinePresentationIntent ?? []
+      let strong = intent.contains(.stronglyEmphasized)
+      // Assign the lighter emphasis ourselves so Markdown does not promote it back to bold.
+      intent.remove(.stronglyEmphasized)
+      formatted[run.range].inlinePresentationIntent = intent.isEmpty ? nil : intent
+      formatted[run.range].font = .system(
+        size: size ?? fontSize, weight: strong ? .medium : weight,
+        design: intent.contains(.code) ? .monospaced : .default)
     }
     return Text(formatted)
   }
@@ -74,8 +83,7 @@ public struct MarkdownUpdateView: View {
         HStack(alignment: .top, spacing: 10) {
           ForEach(rows[row].indices, id: \.self) { column in
             let alignment = column < block.columns.count ? block.columns[column] : .left
-            text(rows[row][column])
-              .font(.system(size: fontSize - 1, weight: row == 0 ? .semibold : .regular))
+            text(rows[row][column], size: fontSize - 1, weight: row == 0 ? .medium : .light)
               .lineLimit(expanded ? nil : 2)
               .multilineTextAlignment(
                 alignment == .right ? .trailing : (alignment == .center ? .center : .leading)
