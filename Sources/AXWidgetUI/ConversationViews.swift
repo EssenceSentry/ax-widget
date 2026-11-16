@@ -10,13 +10,18 @@ public struct ConversationsView: View {
   public var snapshot: Snapshot
   public var compact: Bool
   public var open: ((Conversation) -> Void)?
+  public var answer: QuestionAnswerHandler?
   @Environment(\.colorScheme) private var scheme
   @StateObject private var presentation = ExpansionState()
 
-  public init(snapshot: Snapshot, compact: Bool = false, open: ((Conversation) -> Void)? = nil) {
+  public init(
+    snapshot: Snapshot, compact: Bool = false, open: ((Conversation) -> Void)? = nil,
+    answer: QuestionAnswerHandler? = nil
+  ) {
     self.snapshot = snapshot
     self.compact = compact
     self.open = open
+    self.answer = answer
   }
 
   public var body: some View {
@@ -57,6 +62,14 @@ public struct ConversationsView: View {
     return VStack(alignment: .leading, spacing: compact ? 5 : 8) {
       HStack(alignment: .firstTextBaseline, spacing: 7) {
         title(conversation, palette: palette)
+        if let count = conversation.progress?.runningCount, count > 0 {
+          Label("\(count)", systemImage: "terminal")
+            .font(.system(size: 10, weight: .medium)).foregroundStyle(palette.blue)
+            .padding(.horizontal, 6).padding(.vertical, 3)
+            .background(palette.blue.opacity(0.12), in: Capsule()).fixedSize()
+            .help("\(count) active ax \(count == 1 ? "job" : "jobs")")
+            .accessibilityLabel("\(count) active ax \(count == 1 ? "job" : "jobs")")
+        }
         Spacer(minLength: 3)
         if let date = conversation.updateAt {
           Text(relativeAge(date)).font(.system(size: compact ? 9 : 10))
@@ -97,6 +110,11 @@ public struct ConversationsView: View {
           compact: compact, featured: featured, palette: palette
         )
         .foregroundStyle(conversation.latestUpdate.isEmpty ? palette.secondary : palette.foreground)
+      }
+      ForEach(conversation.questions ?? []) { group in
+        QuestionForm(
+          conversation: conversation, group: group, palette: palette,
+          answer: snapshot.isDemo ? nil : answer, open: open, preview: snapshot.isDemo)
       }
       if !compact, document.blocks.count > 1 || document.source.count > (featured ? 160 : 80) {
         Button(presentation.expanded.contains(conversation.id) ? "Less" : "More") {
@@ -141,21 +159,32 @@ public struct ConversationsView: View {
 }
 
 public struct PanelContent: View {
-  public static let headerHeight: CGFloat = 16
+  public static let headerHeight: CGFloat = 44
   public var snapshot: Snapshot
   public var collapse: () -> Void
   public var open: (Conversation) -> Void
   public var nativeEffects: Bool
   public var heightChanged: ((CGFloat) -> Void)?
+  public var keepFloating: Bool
+  public var toggleFloating: (() -> Void)?
+  public var newConversation: ((Provider) -> Void)?
+  public var answer: QuestionAnswerHandler?
   @Environment(\.colorScheme) private var scheme
   public init(
     snapshot: Snapshot, nativeEffects: Bool = true, heightChanged: ((CGFloat) -> Void)? = nil,
+    keepFloating: Bool = false, toggleFloating: (() -> Void)? = nil,
+    newConversation: ((Provider) -> Void)? = nil,
+    answer: QuestionAnswerHandler? = nil,
     collapse: @escaping () -> Void,
     open: @escaping (Conversation) -> Void
   ) {
     self.snapshot = snapshot
     self.nativeEffects = nativeEffects
     self.heightChanged = heightChanged
+    self.keepFloating = keepFloating
+    self.toggleFloating = toggleFloating
+    self.newConversation = newConversation
+    self.answer = answer
     self.collapse = collapse
     self.open = open
   }
@@ -165,16 +194,43 @@ public struct PanelContent: View {
       ZStack {
         Capsule().fill(palette.secondary.opacity(0.35)).frame(width: 21, height: 3)
         HStack {
+          Button {
+            toggleFloating?()
+          } label: {
+            Image(systemName: keepFloating ? "pin.fill" : "pin").font(.system(size: 10))
+          }.buttonStyle(.plain).foregroundStyle(keepFloating ? palette.blue : palette.secondary)
+            .disabled(toggleFloating == nil)
+            .accessibilityLabel(
+              keepFloating ? "Stop keeping the widget floating" : "Keep widget floating when closed"
+            )
+            .help("Keep floating when closed")
           Spacer()
           Button(action: collapse) { Image(systemName: "chevron.down").font(.system(size: 10)) }
             .buttonStyle(.plain).foregroundStyle(palette.secondary).help("Collapse · Esc")
         }
-      }.frame(height: Self.headerHeight).padding(.horizontal, 12)
+      }.frame(height: 16).padding(.horizontal, 12)
+      HStack(spacing: 14) {
+        ForEach(Provider.allCases) { provider in
+          Button {
+            newConversation?(provider)
+          } label: {
+            HStack(spacing: 5) {
+              ProviderGlyph(provider, size: 12, tint: palette.foreground)
+              Text("New \(provider.label)")
+              Image(systemName: "plus").font(.system(size: 9))
+            }
+          }.buttonStyle(.plain).disabled(newConversation == nil || snapshot.isDemo)
+            .accessibilityLabel("Start a new \(provider.label) conversation")
+        }
+        Spacer(minLength: 0)
+      }.font(.system(size: 11, weight: .medium)).foregroundStyle(palette.secondary)
+        .frame(height: 28).padding(.horizontal, 18)
       if nativeEffects {
         ScrollView {
-          ConversationsView(snapshot: snapshot, open: open).padding(.horizontal, 18).padding(
-            .top, 10
-          ).padding(.bottom, 17)
+          ConversationsView(snapshot: snapshot, open: open, answer: answer).padding(.horizontal, 18)
+            .padding(
+              .top, 10
+            ).padding(.bottom, 17)
             .fixedSize(horizontal: false, vertical: true)
             .background {
               GeometryReader { geometry in
@@ -186,7 +242,8 @@ public struct PanelContent: View {
             }
         }.scrollIndicators(.hidden)
       } else {
-        ConversationsView(snapshot: snapshot, open: open).padding(.horizontal, 18).padding(.top, 10)
+        ConversationsView(snapshot: snapshot, open: open, answer: answer).padding(.horizontal, 18)
+          .padding(.top, 10)
           .padding(.bottom, 17)
         Spacer(minLength: 0)
       }

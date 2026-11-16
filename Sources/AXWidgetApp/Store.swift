@@ -78,8 +78,12 @@ import WidgetKit
         self.usage = allowances
         self.usageIssue = usageIssue
         if refreshUsage { self.lastUsage = Date() }
+        let oldQuestions = Set(self.snapshot.conversations.filter(\.needsAttention).map(\.id))
+        let newQuestions = Set(result.conversations.filter(\.needsAttention).map(\.id))
         self.snapshot = result
-        self.persist(reload: Date().timeIntervalSince(self.lastWidgetReload) >= 60)
+        self.persist(
+          reload: oldQuestions != newQuestions
+            || Date().timeIntervalSince(self.lastWidgetReload) >= 60)
       }
     }
   }

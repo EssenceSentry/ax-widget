@@ -108,6 +108,11 @@ public struct LocalRepository {
         try DaemonClient.request("task.list", dataDirectory: paths.axData) as? [[String: Any]] ?? []
       for row in rows {
         guard let owner = row["owner"] as? String else { continue }
+        if let activity = parseDate(row["updated"]), let conversation = found[owner],
+          activity > conversation.updated
+        {
+          found[owner]?.updated = activity
+        }
         if progress[owner] != nil {
           progress[owner]?.runningCount += 1
           continue
@@ -133,7 +138,10 @@ public struct LocalRepository {
     // must not crowd older, real conversations out of the widget.
     let candidates = found.values.filter { item in
       guard !excluded.contains(item.id), item.updated >= cutoff else { return false }
-      return item.source.map { TranscriptReader.isMainConversation(URL(fileURLWithPath: $0)) }
+      return item.source.map {
+        TranscriptReader.isMainConversation(
+          URL(fileURLWithPath: $0), registeredDesktop: item.desktopSessionID != nil)
+      }
         ?? true
     }
     .sorted { $0.updated > $1.updated }.prefix(24)
@@ -147,6 +155,7 @@ public struct LocalRepository {
           item.updateAt = update.date
           if let activity = update.date, activity > item.updated { item.updated = activity }
           item.needsAttention = update.needsInput
+          item.questions = update.questions
         } catch {
           // Missing or compressed source is visible as an unavailable update, never fabricated.
           item.latestUpdate = ""

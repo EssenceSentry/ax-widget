@@ -32,10 +32,23 @@ are included. There is no brand/count header and no built-in chat editor.
   headers. Permanent titles, labels, controls, and usage figures retain their weight.
 - Numeric progress comes from ax tasks. Reaching a task total does not imply
   that the conversation is complete.
+- Each conversation has a separate numbered badge for its active ax jobs, even
+  while a numeric progress counter is visible.
+- **New Codex** and **New Claude** open a native new-chat composer using the most
+  recent working folder for that provider. Opening the composer sends no prompt.
+- An orange provider dot marks a pending question, in the floating pill and the
+  small system widget; the menu-bar **ax** label also turns orange. The expanded panel shows the original choices and a text
+  field where allowed. **Send answer** submits the selected response to that same
+  conversation; its pending indicator clears when the native transcript records it.
+- Claude inline answers require macOS Accessibility permission, because the
+  installed client handles question submission inside its renderer. AX Widget
+  matches the original question and submit control; ambiguous forms stay unanswered.
+  Without this permission, **Open Claude** remains available.
 - Unknown, stale, or expired usage shows a neutral continuous track and an em dash.
 - All rings use continuous strokes. The supplied OpenAI and Claude SVG marks stay
   vector artwork; OpenAI adapts to the selected appearance.
-- Right-click the menu-bar icon to control Keep floating, appearance, refresh, and quit.
+- The menu-bar icon reads **ax**. Right-click it to control Keep floating,
+  appearance, refresh, and quit.
 
 ## Notification Center and desktop widget
 
@@ -47,6 +60,15 @@ After launching the installed app, open Notification Center, choose Edit Widgets
 and search for **AX Widget**. The same widget can be placed on the desktop.
 Conversation updates live in the floating panel; there is no large system widget.
 Floating mode can be hidden independently.
+
+The floating and menu-bar indicators update with the local reader. Pending-question
+changes request an immediate system-widget reload; macOS still controls when a
+Notification Center widget renders the new snapshot.
+
+Claude and Codex can both be closed while AX Widget runs. It reads their saved
+local histories and keeps the last available updates; clicking a conversation or
+new-chat action launches its provider app. It never launches an agent just to
+refresh a view. Usage that is no longer fresh stays unknown.
 
 The widget reads a private snapshot written by the app; keep the app running for
 new data. macOS controls its refresh timing, so it is a glanceable snapshot.
@@ -100,8 +122,10 @@ Claude conversations need an existing Desktop registration. If one is absent,
 the app explains that ax registers eligible sessions while Claude Desktop is
 fully quit. No new conversation or paid continuation is created as a fallback.
 
-This repository makes no model calls, sends no messages, creates no tasks or
-alarms, and has no notification service, HTTP server, Cloudflare, or analytics.
+Background refresh makes no model calls and sends no messages. Opening a native
+new-chat composer is not a model turn. Sending an answer is an explicit user
+action and can resume that conversation. The widget creates no ax tasks or alarms,
+and has no notification service, HTTP server, Cloudflare, or analytics.
 The approved concept images in [docs/design](docs/design) are illustrative design
 references, not screenshots of shipped behavior. Provider names and icons belong
 to their respective owners; this is an independent local companion.

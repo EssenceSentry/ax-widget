@@ -4,6 +4,19 @@ public enum Provider: String, Codable, CaseIterable, Identifiable, Sendable {
   case codex, claude
   public var id: String { rawValue }
   public var label: String { self == .codex ? "Codex" : "Claude" }
+  public var bundleIdentifier: String {
+    self == .codex ? "com.openai.codex" : "com.anthropic.claudefordesktop"
+  }
+
+  public func newConversationURL(project: String) -> URL? {
+    guard project.hasPrefix("/") else { return nil }
+    var url = URLComponents()
+    url.scheme = self == .codex ? "codex" : "claude"
+    url.host = self == .codex ? "new" : "code"
+    if self == .claude { url.path = "/new" }
+    url.queryItems = [URLQueryItem(name: self == .codex ? "path" : "folder", value: project)]
+    return url.url
+  }
 }
 
 public enum Appearance: String, Codable, CaseIterable, Identifiable, Sendable {
@@ -84,12 +97,14 @@ public struct Conversation: Codable, Identifiable, Equatable, Sendable {
   public var progress: TaskProgress?
   public var needsAttention: Bool
   public var desktopSessionID: String?
+  public var questions: [AgentQuestionGroup]?
   public var id: String { "\(provider.rawValue):\(sessionID)" }
 
   public init(
     provider: Provider, sessionID: String, title: String, project: String = "",
     source: String? = nil, updated: Date, latestUpdate: String = "", updateAt: Date? = nil,
-    progress: TaskProgress? = nil, needsAttention: Bool = false, desktopSessionID: String? = nil
+    progress: TaskProgress? = nil, needsAttention: Bool = false, desktopSessionID: String? = nil,
+    questions: [AgentQuestionGroup]? = nil
   ) {
     self.provider = provider
     self.sessionID = sessionID
@@ -102,6 +117,7 @@ public struct Conversation: Codable, Identifiable, Equatable, Sendable {
     self.progress = progress
     self.needsAttention = needsAttention
     self.desktopSessionID = desktopSessionID
+    self.questions = questions
   }
 
   public var deepLink: URL? {
@@ -201,7 +217,24 @@ public struct Snapshot: Codable, Equatable, Sendable {
           provider: .claude, sessionID: "33333333-3333-4333-8333-333333333333",
           title: "Taxonomy review", updated: date.addingTimeInterval(-300),
           latestUpdate: "The review is *ready*. I need your decision on the `cutoff`.",
-          updateAt: date.addingTimeInterval(-300), needsAttention: true),
+          updateAt: date.addingTimeInterval(-300), needsAttention: true,
+          questions: [
+            AgentQuestionGroup(
+              id: "demo-question", kind: .claude,
+              questions: [
+                AgentQuestion(
+                  id: "hook", index: 0, title: "Which hook should I use?", header: "Hook",
+                  options: [
+                    AgentQuestionOption(
+                      label: "The pain one", description: "Lead with the problem."),
+                    AgentQuestionOption(
+                      label: "The number one", description: "Lead with a concrete result."),
+                    AgentQuestionOption(
+                      label: "The question one", description: "Invite the viewer to think."),
+                  ],
+                  multiple: false, allowsText: true, secret: false)
+              ])
+          ]),
       ], isDemo: true)
   }
 }

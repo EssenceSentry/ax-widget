@@ -249,6 +249,10 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
     try line.write(to: file, atomically: true, encoding: .utf8)
     #expect(!TranscriptReader.isMainConversation(file))
   }
+  try #"{"type":"user","entrypoint":"sdk-cli","isSidechain":false,"sessionKind":"interactive"}"#
+    .write(to: file, atomically: true, encoding: .utf8)
+  #expect(TranscriptReader.isMainConversation(file, registeredDesktop: true))
+  #expect(!TranscriptReader.isMainConversation(file))
   try #"{"type":"user","entrypoint":"claude-vscode","isSidechain":false}"#.write(
     to: file, atomically: true, encoding: .utf8)
   #expect(TranscriptReader.isMainConversation(file))

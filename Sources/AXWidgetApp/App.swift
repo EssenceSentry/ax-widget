@@ -1,6 +1,7 @@
 import AXWidgetCore
 import AXWidgetUI
 import AppKit
+import Combine
 import Foundation
 
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -8,14 +9,23 @@ import Foundation
   private var floating: FloatingController!
   private var statusItem: NSStatusItem!
   private var pendingURLs: [URL] = []
+  private var answering = false
+  private var statusSubscription: AnyCancellable?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
     floating = FloatingController(store: store)
     floating.openConversation = { [weak self] conversation in self?.open(conversation) }
-    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    floating.newConversation = { [weak self] provider in self?.startConversation(provider) }
+    floating.answerQuestion = { [weak self] conversation, group, answers in
+      guard let self else { return "AX Widget is unavailable." }
+      return await self.answer(conversation, group: group, answers: answers)
+    }
+    statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     if let button = statusItem.button {
-      button.image = NSImage(
-        systemSymbolName: "circle.circle", accessibilityDescription: "AX Widget")
+      button.image = nil
+      button.title = "ax"
+      button.font = .monospacedSystemFont(ofSize: 13, weight: .medium)
+      button.setAccessibilityLabel("ax")
       button.toolTip = "Click to toggle conversations · Right-click for options"
       button.target = self
       button.action = #selector(statusClicked(_:))
@@ -24,6 +34,21 @@ import Foundation
     floating.isTriggerClick = { [weak self] point in
       guard let button = self?.statusItem.button, let window = button.window else { return false }
       return window.convertToScreen(button.convert(button.bounds, to: nil)).contains(point)
+    }
+    statusSubscription = store.$snapshot.sink { [weak self] snapshot in
+      guard let button = self?.statusItem.button else { return }
+      let pending = snapshot.conversations.contains(where: \.needsAttention)
+      button.attributedTitle = NSAttributedString(
+        string: "ax",
+        attributes: [
+          .font: NSFont.monospacedSystemFont(ofSize: 13, weight: .medium),
+          .foregroundColor: pending ? NSColor.systemOrange : NSColor.labelColor,
+        ])
+      button.setAccessibilityLabel(pending ? "ax, question waiting" : "ax")
+      button.toolTip =
+        pending
+        ? "Question waiting · Click to answer · Right-click for options"
+        : "Click to toggle conversations · Right-click for options"
     }
     store.start()
     if CommandLine.arguments.contains("--expanded") { floating.expand() }
@@ -94,6 +119,56 @@ import Foundation
     alert.runModal()
   }
 
+  private func answer(
+    _ conversation: Conversation, group: AgentQuestionGroup, answers: [String: [String]]
+  ) async -> String? {
+    guard !store.demo, !answering, let source = conversation.source,
+      let fresh = try? TranscriptReader.read(URL(fileURLWithPath: source)),
+      fresh.questions.contains(group), let url = conversation.deepLink
+    else {
+      return
+        "This question has changed or is no longer awaiting an answer. Refresh or open the conversation."
+    }
+    if conversation.provider == .claude && !ClaudeQuestionClient.isTrusted {
+      return QuestionDeliveryError.accessibilityRequired.localizedDescription
+    }
+    guard
+      let app = NSWorkspace.shared.urlForApplication(
+        withBundleIdentifier: conversation.provider.bundleIdentifier)
+    else {
+      return "\(conversation.provider.label) is not installed."
+    }
+    answering = true
+    defer { answering = false }
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.activates = false
+    do {
+      let running: NSRunningApplication = try await withCheckedThrowingContinuation {
+        continuation in
+        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration) {
+          running, error in
+          if let error {
+            continuation.resume(throwing: error)
+          } else if let running {
+            continuation.resume(returning: running)
+          } else {
+            continuation.resume(throwing: AxClient.ClientError.unavailable)
+          }
+        }
+      }
+      let pid = running.processIdentifier
+      try await Task.detached(priority: .userInitiated) {
+        if conversation.provider == .codex {
+          try CodexQuestionClient.reply(
+            sessionID: conversation.sessionID, group: group, answers: answers)
+        } else {
+          try ClaudeQuestionClient.reply(pid: pid, group: group, answers: answers)
+        }
+      }.value
+      return nil
+    } catch { return error.localizedDescription }
+  }
+
   private func open(_ conversation: Conversation) {
     guard !store.demo else { return }
     guard let url = conversation.deepLink else {
@@ -104,11 +179,26 @@ import Foundation
       alert.runModal()
       return
     }
-    let bundle =
-      conversation.provider == .codex ? "com.openai.codex" : "com.anthropic.claudefordesktop"
-    guard let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle) else {
+    open(url, provider: conversation.provider)
+  }
+
+  private func startConversation(_ provider: Provider) {
+    guard !store.demo else { return }
+    let project =
+      store.snapshot.conversations.first { $0.provider == provider && $0.project.hasPrefix("/") }?
+      .project
+      ?? FileManager.default.homeDirectoryForCurrentUser.path
+    guard let url = provider.newConversationURL(project: project) else { return }
+    open(url, provider: provider)
+  }
+
+  private func open(_ url: URL, provider: Provider) {
+    guard
+      let app = NSWorkspace.shared.urlForApplication(
+        withBundleIdentifier: provider.bundleIdentifier)
+    else {
       let alert = NSAlert()
-      alert.messageText = "\(conversation.provider.label) is not installed"
+      alert.messageText = "\(provider.label) is not installed"
       alert.runModal()
       return
     }

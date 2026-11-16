@@ -44,6 +44,8 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   private var contentHeight: CGFloat = 0
   private var collapsedOrigin: NSPoint
   var openConversation: ((Conversation) -> Void)?
+  var newConversation: ((Provider) -> Void)?
+  var answerQuestion: QuestionAnswerHandler?
   var isTriggerClick: ((NSPoint) -> Bool)?
 
   init(store: AppStore) {
@@ -81,11 +83,15 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     localMonitor = NSEvent.addLocalMonitorForEvents(matching: [
       .leftMouseDown, .rightMouseDown, .keyDown,
     ]) { [weak self] event in
-      if event.type == .keyDown, event.keyCode == 53 {
+      if event.type == .keyDown, event.keyCode == 53,
+        event.window === self?.panel || event.window === self?.details
+      {
         self?.collapse()
         return nil
       }
-      if event.window !== self?.panel && event.window !== self?.details { self?.outsideClick() }
+      if event.type != .keyDown, event.window !== self?.panel && event.window !== self?.details {
+        self?.outsideClick()
+      }
       return event
     }
     collapse()
@@ -94,6 +100,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   func setKeepFloating(_ keep: Bool) {
     presentation.keepFloating = keep
     UserDefaults.standard.set(keep, forKey: "showFloating")
+    update(store.snapshot)
     applyVisibility()
   }
 
@@ -161,6 +168,13 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   private func content(_ snapshot: Snapshot) -> PanelContent {
     PanelContent(
       snapshot: snapshot, heightChanged: { [weak self] height in self?.fitContent(height) },
+      keepFloating: keepFloating,
+      toggleFloating: { [weak self] in
+        guard let self else { return }
+        self.setKeepFloating(!self.keepFloating)
+      },
+      newConversation: { [weak self] provider in self?.newConversation?(provider) },
+      answer: answerQuestion,
       collapse: { [weak self] in self?.collapse() },
       open: { [weak self] conversation in
         self?.openConversation?(conversation)

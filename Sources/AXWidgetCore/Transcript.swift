@@ -4,11 +4,12 @@ public struct TranscriptUpdate: Equatable {
   public var text = ""
   public var date: Date?
   public var needsInput = false
+  public var questions: [AgentQuestionGroup] = []
   public init() {}
 }
 
 public enum TranscriptReader {
-  public static func isMainConversation(_ url: URL) -> Bool {
+  public static func isMainConversation(_ url: URL, registeredDesktop: Bool = false) -> Bool {
     guard let handle = try? FileHandle(forReadingFrom: url) else { return true }
     defer { try? handle.close() }
     let data = (try? handle.read(upToCount: 32_768)) ?? Data()
@@ -19,6 +20,7 @@ public enum TranscriptReader {
       if row["type"] as? String == "user", let entrypoint = row["entrypoint"] as? String {
         if row["isSidechain"] as? Bool == true { return false }
         if let kind = row["sessionKind"] as? String, kind != "interactive" { return false }
+        if registeredDesktop && entrypoint == "sdk-cli" { return true }
         return [
           "cli", "claude-vscode", "claude-code-vscode", "claude-desktop", "desktop", "vscode",
         ].contains(entrypoint)
@@ -47,16 +49,20 @@ public enum TranscriptReader {
     let text = String(decoding: data, as: UTF8.self)
     var lines = text.split(separator: "\n", omittingEmptySubsequences: true)
     if offset > 0, !lines.isEmpty { lines.removeFirst() }
-    return parse(lines.map(String.init))
+    var update = parse(lines.map(String.init))
+    update.questions = try QuestionJournal.pending(url)
+    update.needsInput = !update.questions.isEmpty
+    return update
   }
 
   public static func parse(_ lines: [String]) -> TranscriptUpdate {
     var update = TranscriptUpdate()
-    var pending: Set<String> = []
+    var tracker = QuestionTracker()
     for line in lines {
       guard let data = line.data(using: .utf8),
         let row = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
       else { continue }
+      tracker.consume(row)
       let type = row["type"] as? String
       let payload = row["payload"] as? [String: Any] ?? [:]
       let stamp = parseDate(row["timestamp"])
@@ -67,43 +73,18 @@ public enum TranscriptReader {
         {
           text = textBlocks(payload["content"])
         }
-        if payload["type"] as? String == "function_call",
-          let name = payload["name"] as? String,
-          ["request_user_input", "request_user_input_async"].contains(name),
-          let id = payload["call_id"] as? String
-        {
-          pending.insert(id)
-        }
-        if payload["type"] as? String == "function_call_output",
-          let id = payload["call_id"] as? String,
-          !(payload["output"] as? String ?? "").contains("queued")
-        {
-          pending.remove(id)
-        }
-        if payload["role"] as? String == "user" { pending.removeAll() }
       } else if type == "event_msg", payload["type"] as? String == "agent_message" {
         text = payload["message"] as? String
       } else if type == "assistant", let message = row["message"] as? [String: Any] {
         text = textBlocks(message["content"])
-        for block in message["content"] as? [[String: Any]] ?? [] {
-          if block["type"] as? String == "tool_use", block["name"] as? String == "AskUserQuestion",
-            let id = block["id"] as? String
-          {
-            pending.insert(id)
-          }
-        }
-      } else if type == "user", let message = row["message"] as? [String: Any] {
-        for block in message["content"] as? [[String: Any]] ?? [] {
-          if let id = block["tool_use_id"] as? String { pending.remove(id) }
-        }
-        if message["content"] is String { pending.removeAll() }
       }
       if let text = text?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
         update.text = String(text.prefix(12_000))
         update.date = stamp
       }
     }
-    update.needsInput = !pending.isEmpty
+    update.questions = tracker.pending
+    update.needsInput = !update.questions.isEmpty
     return update
   }
 
