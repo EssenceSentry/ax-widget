@@ -102,20 +102,20 @@ import ApplicationServices
     }
     let frames = windows.map { WindowAX.frame($0.window) }
     try minimize(pins)
-    try await Task.sleep(nanoseconds: 300_000_000)
-    let minimized = windows.allSatisfy {
-      WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool == true
+    let minimized = try await waitForNativeTransition {
+      windows.allSatisfy { WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool == true }
     }
     try await show(pins, screen: NSScreen.main)
     NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?
       .activate(options: [])
-    try await Task.sleep(nanoseconds: 300_000_000)
-    let switchedAway =
+    let switchedAway = try await waitForNativeTransition {
       NSWorkspace.shared.frontmostApplication?.bundleIdentifier == "com.apple.finder"
+    }
     try await show(pins, screen: NSScreen.main)
-    try await Task.sleep(nanoseconds: 300_000_000)
-    let visible = windows.allSatisfy {
-      WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool == false && valid($0)
+    let visible = try await waitForNativeTransition {
+      windows.allSatisfy {
+        WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool == false && valid($0)
+      }
     }
     let preserved = zip(windows, frames).allSatisfy { WindowAX.frame($0.0.window) == $0.1 }
     let restarted = ConversationWindows(persist: false)
@@ -125,7 +125,11 @@ import ApplicationServices
       guard let old = bindings[pin.id], let new = restarted.bindings[pin.id] else { return false }
       return CFEqual(old.window, new.window)
     }
-    let frontmost = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+    let providerForeground = try await waitForNativeTransition {
+      pins.contains {
+        $0.provider.bundleIdentifier == NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+      }
+    }
     let stacking = WindowAX.stacking(windows.map { ($0.pid, $0.window) })
     if let value = ProcessInfo.processInfo.environment["AX_WIDGET_VERIFY_HOLD_SECONDS"],
       let seconds = Double(value), seconds > 0, seconds <= 10
@@ -148,11 +152,20 @@ import ApplicationServices
       "count": pins.count, "identitiesVerified": windows.allSatisfy(valid),
       "minimizedTogether": minimized, "switchedAway": switchedAway,
       "restoredTogether": visible, "manualFramesPreserved": preserved,
-      "providerForeground": pins.contains { $0.provider.bundleIdentifier == frontmost },
+      "providerForeground": providerForeground,
       "reusedAfterWidgetRestart": reused,
       "raisedTogether": stacking.raised.map { $0 as Any } ?? NSNull(),
       "normalWindowLevels": stacking.normal.map { $0 as Any } ?? NSNull(),
     ]
+  }
+
+  private func waitForNativeTransition(_ condition: () -> Bool) async throws -> Bool {
+    let deadline = Date().addingTimeInterval(3)
+    repeat {
+      if condition() { return true }
+      try await Task.sleep(nanoseconds: 100_000_000)
+    } while Date() < deadline
+    return condition()
   }
 
   func forget(_ id: String) {
