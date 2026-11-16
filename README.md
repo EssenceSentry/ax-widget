@@ -24,7 +24,7 @@ are included. There is no brand/count header and no built-in chat editor.
   with its content; scrolling begins only at the available screen height.
 - Updates render native Markdown: bold, italics, links, headings, lists, code
   blocks, and wrapping tables. Internal memory-citation markup is hidden.
-- Rendered prose uses light text with medium-weight emphasis, headings, and table
+- Rendered prose uses regular text with medium-weight emphasis, headings, and table
   headers. Permanent titles, labels, controls, and usage figures retain their weight.
 - Numeric progress comes from ax tasks. Reaching a task total does not imply
   that the conversation is complete.

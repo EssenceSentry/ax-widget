@@ -27,7 +27,7 @@ public struct MarkdownUpdateView: View {
         blockView(block)
       }
     }.frame(maxWidth: .infinity, alignment: .leading)
-      .font(.system(size: fontSize, weight: .light)).lineSpacing(compact ? 1 : 2)
+      .font(.system(size: fontSize, weight: .regular)).lineSpacing(compact ? 1 : 2)
       .fixedSize(horizontal: false, vertical: true)
   }
 
@@ -40,7 +40,7 @@ public struct MarkdownUpdateView: View {
         .lineLimit(expanded ? nil : 1)
     case .code:
       Text(String(block.text.characters).trimmingCharacters(in: .newlines))
-        .font(.system(size: fontSize - 1, weight: .light, design: .monospaced))
+        .font(.system(size: fontSize - 1, weight: .regular, design: .monospaced))
         .lineLimit(expanded ? nil : previewLines)
         .frame(maxWidth: .infinity, alignment: .leading).padding(8)
         .background(palette.track.opacity(0.45), in: RoundedRectangle(cornerRadius: 5))
@@ -59,7 +59,7 @@ public struct MarkdownUpdateView: View {
     }
   }
 
-  private func text(_ value: AttributedString, size: CGFloat? = nil, weight: Font.Weight = .light)
+  private func text(_ value: AttributedString, size: CGFloat? = nil, weight: Font.Weight = .regular)
     -> Text
   {
     var formatted = value
@@ -83,7 +83,7 @@ public struct MarkdownUpdateView: View {
         HStack(alignment: .top, spacing: 10) {
           ForEach(rows[row].indices, id: \.self) { column in
             let alignment = column < block.columns.count ? block.columns[column] : .left
-            text(rows[row][column], size: fontSize - 1, weight: row == 0 ? .medium : .light)
+            text(rows[row][column], size: fontSize - 1, weight: row == 0 ? .medium : .regular)
               .lineLimit(expanded ? nil : 2)
               .multilineTextAlignment(
                 alignment == .right ? .trailing : (alignment == .center ? .center : .leading)
