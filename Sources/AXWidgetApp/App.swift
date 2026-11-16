@@ -366,13 +366,23 @@ import Foundation
   @MainActor static func main() {
     if let index = CommandLine.arguments.firstIndex(of: "--verify-window-group") {
       let ids = Array(CommandLine.arguments.dropFirst(index + 1))
-      let recent = LocalRepository().conversations(limit: 40).items
+      let retained = ids.compactMap { id -> ConversationPin? in
+        let parts = id.split(separator: ":")
+        guard parts.count == 2, parts[0] == "codex",
+          let title = CodexWindowIdentity.title(sessionID: String(parts[1]))
+        else { return nil }
+        return ConversationPin(
+          Conversation(
+            provider: .codex, sessionID: String(parts[1]),
+            title: title, updated: .distantPast))
+      }
+      let recent = LocalRepository().conversations(limit: 40, pins: retained).items
       let pins = ids.compactMap { id in recent.first { $0.id == id }.map(ConversationPin.init) }
       guard !pins.isEmpty, pins.count == ids.count, pins.count <= 3,
         Set(ids).count == ids.count
       else {
         FileHandle.standardOutput.write(
-          Data("{\"error\":\"Pass one to three distinct recent provider:session IDs.\"}".utf8))
+          Data("{\"error\":\"Pass one to three distinct known provider:session IDs.\"}".utf8))
         return
       }
       let app = NSApplication.shared
