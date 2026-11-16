@@ -300,14 +300,21 @@ public struct PanelContent: View {
     }
     .background {
       if nativeEffects {
-        NativeMaterial(appearance: snapshot.appearance)
-          .overlay(palette.background.opacity(reduceTransparency ? 1 : palette.surfaceOpacity))
+        if !palette.frost {
+          NativeMaterial(appearance: snapshot.appearance)
+            .overlay(palette.background.opacity(reduceTransparency ? 1 : palette.surfaceOpacity))
+        }
       } else {
         palette.background
       }
     }
     .clipShape(RoundedRectangle(cornerRadius: 17))
-    .overlay(RoundedRectangle(cornerRadius: 17).stroke(palette.separator, lineWidth: 0.7))
+    .overlay {
+      if !palette.frost || !nativeEffects {
+        RoundedRectangle(cornerRadius: 17).stroke(palette.separator, lineWidth: 0.7)
+      }
+    }
+    .modifier(NativeFrostSurface(enabled: palette.frost && nativeEffects, cornerRadius: 17))
     .preferredColorScheme(snapshot.appearance.colorScheme)
   }
 }

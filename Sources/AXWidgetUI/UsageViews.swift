@@ -56,7 +56,7 @@ public struct ProviderGauge: View {
   }
   public var body: some View {
     ZStack {
-      Circle().fill(palette.background.opacity(palette.frost ? 0.55 : 0.88))
+      Circle().fill(palette.frost ? Color.clear : palette.background.opacity(0.88))
       if provider == .codex {
         ring(snapshot.codex, color: palette.blue, inset: 2)
       } else {
@@ -105,7 +105,6 @@ public struct CollapsedView: View {
   public var snapshot: Snapshot
   public var nativeEffects: Bool
   @Environment(\.colorScheme) private var scheme
-  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   public init(snapshot: Snapshot, nativeEffects: Bool = true) {
     self.snapshot = snapshot
     self.nativeEffects = nativeEffects
@@ -123,16 +122,12 @@ public struct CollapsedView: View {
     }.padding(4)
       .background {
         if palette.frost {
-          ZStack {
-            if nativeEffects { NativeMaterial(appearance: snapshot.appearance) }
-            palette.background.opacity(
-              reduceTransparency || !nativeEffects ? 1 : palette.surfaceOpacity)
-          }.clipShape(Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(0.7), lineWidth: 0.7))
+          if !nativeEffects { Capsule().fill(palette.background) }
         } else {
           Capsule().fill(palette.background.opacity(0.25))
         }
       }
+      .modifier(NativeFrostSurface(enabled: palette.frost && nativeEffects, cornerRadius: 24))
       .preferredColorScheme(snapshot.appearance.colorScheme)
   }
 }

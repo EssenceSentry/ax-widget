@@ -7,8 +7,11 @@ Click a conversation title to open that exact chat in its native desktop app.
 
 **Carbon**, **Porcelain**, and **Frost** share the same layout. System appearance
 is the default; choose a theme from the menu-bar icon's **Appearance** submenu.
-Frost uses cool glass with native background blur and slate text; it becomes
-opaque when macOS Reduce Transparency is enabled. Both the floating interface and a small native Notification Center widget
+Frost uses native Liquid Glass on macOS 26 and newer, and the standard system
+popover material on older versions. Its text colors and light/dark appearance
+follow macOS, with no custom blue background tint or simulated glass border.
+Reduce Transparency uses an opaque system background. The small system widget
+uses the native widget material. Both the floating interface and a small native Notification Center widget
 are included. There is no brand/count header and no built-in chat editor.
 
 ## Floating mode
@@ -102,8 +105,9 @@ with a provisioned App Group. No Apple signing identity or notarization is claim
 
 ## Build
 
-Requires macOS 14+, Swift 6+, and installed ax for usage snapshots. Full system
-widgets require Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Runs on macOS 14+. Building requires the macOS 26 SDK (Xcode 26 or newer),
+Swift 6+, and installed ax for usage snapshots. Full system widgets require
+Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```sh
 swift test --jobs 2

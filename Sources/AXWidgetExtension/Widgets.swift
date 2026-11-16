@@ -49,8 +49,7 @@ private struct WidgetBackground: View {
     let palette = Palette(appearance, scheme: scheme)
     ZStack {
       if palette.frost && !reduceTransparency {
-        Rectangle().fill(.ultraThinMaterial)
-        palette.background.opacity(0.55)
+        Rectangle().fill(.regularMaterial)
       } else {
         palette.background
       }
