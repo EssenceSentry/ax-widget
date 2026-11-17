@@ -1,9 +1,10 @@
 # AX Widget
 
-A native Mac companion for [ax](https://github.com/EssenceSentry/agent-skills).
-Keep Claude and Codex allowance visible in two tiny floating rings. Click to
-expand recent conversations, their latest agent-written update, and task progress.
-Click a conversation title to open that exact chat in its native desktop app.
+See which Claude or Codex conversation needs attention without opening every window. Two small rings show provider allowance. Expand the panel to read the latest update or task progress, then click the conversation to return to its native app.
+
+![Porcelain design reference showing the compact usage rings and expanded conversation panel.](docs/design/floating-porcelain.png)
+
+**Preview it on a Mac.** With the [build prerequisites](#build) installed, run `swift run AXWidget --demo --expanded` to explore the panel with synthetic conversations. For live usage, connect the [ax workbench](https://github.com/EssenceSentry/agent-skills/tree/ax-workbench). The floating app and the [small system widget](#notification-center-and-desktop-widget) have separate build requirements.
 
 **Carbon**, **Porcelain**, and **Frost** share the same layout. System appearance
 is the default; choose a theme from the menu-bar icon's **Appearance** submenu.
@@ -161,6 +162,13 @@ Xcode and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 swift test --jobs 2
 scripts/build.sh
 scripts/install.sh
+```
+
+If Swift Testing reports that it cannot find the `TestingMacros` plugin with Command Line Tools selected, load the bundled macro explicitly:
+
+```sh
+plugin="$(xcode-select -p)/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib"
+swift test --jobs 2 -Xswiftc -load-plugin-library -Xswiftc "$plugin"
 ```
 
 With Command Line Tools alone the build script produces the floating app.
