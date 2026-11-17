@@ -33,9 +33,11 @@ public struct WidgetConversationPins: Equatable, Sendable {
 
   public func ordered(_ conversations: [Conversation], limit: Int) -> [Conversation] {
     let ids = Set(pins.map(\.id))
-    let pinned = pins.compactMap { pin in conversations.first { $0.id == pin.id } }
-    return pinned
-      + conversations.filter { !ids.contains($0.id) }
-      .sorted { $0.updated > $1.updated }.prefix(max(0, limit))
+    var seen: Set<String> = []
+    let unique = conversations.sorted { $0.updated > $1.updated }.filter {
+      seen.insert($0.id).inserted
+    }
+    let pinned = pins.compactMap { pin in unique.first { $0.id == pin.id } }
+    return pinned + unique.filter { !ids.contains($0.id) }.prefix(max(0, limit))
   }
 }

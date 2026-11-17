@@ -21,12 +21,14 @@ public struct LocalRepository {
 
   public func conversations(limit: Int = 8, at date: Date = Date(), pins: [ConversationPin] = [])
     -> (
-      items: [Conversation], issues: [String]
+      items: [Conversation], issues: [String], aliases: ClaudeSessionAliases
     )
   {
     let cutoff = date.addingTimeInterval(-12 * 3600)
     var found: [String: Conversation] = [:]
-    let saved = WidgetConversationPins(pins: pins)
+    let records = desktopRecords()
+    let aliases = ClaudeSessionAliases(records: records, paths: paths)
+    let saved = WidgetConversationPins(pins: pins.map(aliases.resolve))
     let pinnedIDs = Set(saved.pins.map(\.id))
     for pin in saved.pins { found[pin.id] = pin.conversation }
     var issues: [String] = []
@@ -43,7 +45,7 @@ public struct LocalRepository {
             provider: provider, sessionID: id, title: row["title"] ?? "Untitled",
             project: row["project"] ?? "", source: row["source"],
             updated: parseDate(row["updated"]) ?? .distantPast)
-          found[item.id] = item
+          if aliases.key(item.id) == item.id { found[item.id] = item }
         }
       } catch { issues.append("ax conversation index: \(error.localizedDescription)") }
     }
@@ -91,7 +93,7 @@ public struct LocalRepository {
       }
     } catch { issues.append("Codex history: \(error.localizedDescription)") }
 
-    for record in desktopRecords() {
+    for record in records {
       guard let id = record["cliSessionId"] as? String, UUID(uuidString: id) != nil else {
         continue
       }
@@ -122,7 +124,8 @@ public struct LocalRepository {
       let rows =
         try DaemonClient.request("task.list", dataDirectory: paths.axData) as? [[String: Any]] ?? []
       for row in rows {
-        guard let owner = row["owner"] as? String else { continue }
+        guard let rawOwner = row["owner"] as? String else { continue }
+        let owner = aliases.key(rawOwner)
         if let activity = parseDate(row["updated"]) {
           jobActivity[owner] = max(jobActivity[owner] ?? .distantPast, activity)
           if activity > found[owner]?.updated ?? .distantPast { found[owner]?.updated = activity }
@@ -197,7 +200,7 @@ public struct LocalRepository {
       }
       if item.updated >= cutoff || pinnedIDs.contains(item.id) { items.append(item) }
     }
-    return (saved.ordered(items, limit: limit), issues)
+    return (saved.ordered(items, limit: limit), issues, aliases)
   }
 
   func desktopRecords() -> [[String: Any]] {

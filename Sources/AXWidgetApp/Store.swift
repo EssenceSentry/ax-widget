@@ -22,6 +22,7 @@ import WidgetKit
   let demo: Bool
   private(set) var group: ConversationGroup
   private(set) var widgetPins: WidgetConversationPins
+  private var sessionAliases = ClaudeSessionAliases()
   private var groupIssue: String?
   private var groupBusy = false
   func setGroupBusy(_ busy: Bool) {
@@ -30,8 +31,8 @@ import WidgetKit
   }
 
   func setGroup(_ value: ConversationGroup) {
-    group = value
-    if !demo, let data = try? JSONEncoder().encode(value.pins) {
+    group = ConversationGroup(pins: value.pins.map(sessionAliases.resolve))
+    if !demo, let data = try? JSONEncoder().encode(group.pins) {
       UserDefaults.standard.set(data, forKey: "conversationPins")
     }
     snapshot.windowGroupConversationIDs = group.pins.map(\.id)
@@ -40,8 +41,8 @@ import WidgetKit
   }
 
   func setWidgetPins(_ value: WidgetConversationPins) {
-    widgetPins = value
-    if !demo, let data = try? JSONEncoder().encode(value.pins) {
+    widgetPins = WidgetConversationPins(pins: value.pins.map(sessionAliases.resolve))
+    if !demo, let data = try? JSONEncoder().encode(widgetPins.pins) {
       UserDefaults.standard.set(data, forKey: "widgetConversationPins")
     }
     snapshot.pinnedConversationIDs = widgetPins.pins.map(\.id)
@@ -138,7 +139,7 @@ import WidgetKit
     refreshing = true
     let pins = widgetPins.pins
     queue.async { [weak self] in
-      let (conversations, issues) = LocalRepository().conversations(limit: 8, pins: pins)
+      let (conversations, issues, aliases) = LocalRepository().conversations(limit: 8, pins: pins)
       Task { @MainActor in
         guard let self else { return }
         self.refreshing = false
@@ -148,6 +149,21 @@ import WidgetKit
           self.refreshPending = false
           self.refresh()
           return
+        }
+        self.sessionAliases = aliases
+        let resolvedPins = WidgetConversationPins(pins: pins.map(aliases.resolve))
+        if resolvedPins != self.widgetPins {
+          self.widgetPins = resolvedPins
+          if let data = try? JSONEncoder().encode(resolvedPins.pins) {
+            UserDefaults.standard.set(data, forKey: "widgetConversationPins")
+          }
+        }
+        let resolvedGroup = ConversationGroup(pins: self.group.pins.map(aliases.resolve))
+        if resolvedGroup != self.group {
+          self.group = resolvedGroup
+          if let data = try? JSONEncoder().encode(resolvedGroup.pins) {
+            UserDefaults.standard.set(data, forKey: "conversationPins")
+          }
         }
         var result = Snapshot(
           allowances: self.usage, conversations: conversations,

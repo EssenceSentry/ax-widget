@@ -40,6 +40,10 @@ are included. There is no brand/count header and no built-in chat editor.
   eight other recent chats. Widget pins persist across restarts and have no
   three-window limit. Pinning to the widget requires no Accessibility permission
   and does not open or arrange a provider window.
+  When Claude continues a Desktop chat under a new CLI session ID, the widget
+  follows its registered prior-session IDs and shows one conversation. Widget
+  pins, window-group membership, and active jobs follow that same chat. Separate
+  chats with the same title remain separate.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. **More** appears only when the rendered preview actually
   clips content, and expands the text in place. The panel grows and shrinks
