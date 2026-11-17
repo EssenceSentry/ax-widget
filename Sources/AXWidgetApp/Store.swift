@@ -111,6 +111,21 @@ import WidgetKit
   func refresh(forceUsage: Bool = false) {
     if demo {
       var sample = Snapshot.demo()
+      if let flag = CommandLine.arguments.firstIndex(of: "--demo-task"),
+        CommandLine.arguments.indices.contains(flag + 1),
+        AttachCommand.isTaskID(CommandLine.arguments[flag + 1])
+      {
+        let id = CommandLine.arguments[flag + 1]
+        var progress = TaskProgress(stage: "Running the demo command", runningCount: 1)
+        progress.attachableIDs = [id]
+        sample.conversations = [
+          Conversation(
+            provider: .codex,
+            sessionID: "11111111-1111-4111-8111-111111111111", title: "Terminal recovery demo",
+            updated: Date(), latestUpdate: "Open the task menu to reattach to this command.",
+            progress: progress)
+        ]
+      }
       sample.appearance = appearance
       snapshot = sample
       return

@@ -22,6 +22,7 @@ public struct ConversationsView: View {
   public var compact: Bool
   public var staticPreview: Bool
   public var open: ((Conversation) -> Void)?
+  public var attachTask: ((String) -> Void)?
   public var answer: QuestionAnswerHandler?
   public var togglePin: ((Conversation) -> Void)?
   public var toggleWindowGroup: ((Conversation) -> Void)?
@@ -31,13 +32,15 @@ public struct ConversationsView: View {
   public init(
     snapshot: Snapshot, compact: Bool = false, staticPreview: Bool = false,
     open: ((Conversation) -> Void)? = nil,
-    answer: QuestionAnswerHandler? = nil, togglePin: ((Conversation) -> Void)? = nil,
+    attachTask: ((String) -> Void)? = nil, answer: QuestionAnswerHandler? = nil,
+    togglePin: ((Conversation) -> Void)? = nil,
     toggleWindowGroup: ((Conversation) -> Void)? = nil
   ) {
     self.snapshot = snapshot
     self.compact = compact
     self.staticPreview = staticPreview
     self.open = open
+    self.attachTask = attachTask
     self.answer = answer
     self.togglePin = togglePin
     self.toggleWindowGroup = toggleWindowGroup
@@ -112,12 +115,23 @@ public struct ConversationsView: View {
             )
         }
         if let count = conversation.progress?.runningCount, count > 0 {
-          Label("\(count)", systemImage: "terminal")
-            .font(.system(size: 10, weight: .medium)).foregroundStyle(palette.blue)
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(palette.blue.opacity(0.12), in: Capsule()).fixedSize()
-            .help("\(count) active ax \(count == 1 ? "job" : "jobs")")
-            .accessibilityLabel("\(count) active ax \(count == 1 ? "job" : "jobs")")
+          if let attachTask, let ids = conversation.progress?.attachableIDs, !ids.isEmpty {
+            Menu {
+              ForEach(ids, id: \.self) { id in
+                Button("Reattach \(id) in Terminal") { attachTask(id) }
+              }
+            } label: {
+              Label("\(count)", systemImage: "terminal")
+            }.menuStyle(.borderlessButton).fixedSize()
+              .accessibilityLabel("Reattach a running task")
+          } else {
+            Label("\(count)", systemImage: "terminal")
+              .font(.system(size: 10, weight: .medium)).foregroundStyle(palette.blue)
+              .padding(.horizontal, 6).padding(.vertical, 3)
+              .background(palette.blue.opacity(0.12), in: Capsule()).fixedSize()
+              .help("\(count) active ax \(count == 1 ? "job" : "jobs")")
+              .accessibilityLabel("\(count) active ax \(count == 1 ? "job" : "jobs")")
+          }
         }
         Spacer(minLength: 3)
         if let date = conversation.updateAt {
@@ -251,6 +265,7 @@ public struct PanelContent: View {
   public var keepFloating: Bool
   public var toggleFloating: (() -> Void)?
   public var newConversation: ((Provider) -> Void)?
+  public var attachTask: ((String) -> Void)?
   public var answer: QuestionAnswerHandler?
   public var togglePin: ((Conversation) -> Void)?
   public var toggleWindowGroup: ((Conversation) -> Void)?
@@ -263,7 +278,7 @@ public struct PanelContent: View {
     snapshot: Snapshot, nativeEffects: Bool = true, heightChanged: ((CGFloat) -> Void)? = nil,
     keepFloating: Bool = false, toggleFloating: (() -> Void)? = nil,
     newConversation: ((Provider) -> Void)? = nil,
-    answer: QuestionAnswerHandler? = nil,
+    attachTask: ((String) -> Void)? = nil, answer: QuestionAnswerHandler? = nil,
     togglePin: ((Conversation) -> Void)? = nil,
     toggleWindowGroup: ((Conversation) -> Void)? = nil,
     showGroup: (() -> Void)? = nil, minimizeGroup: (() -> Void)? = nil,
@@ -277,6 +292,7 @@ public struct PanelContent: View {
     self.keepFloating = keepFloating
     self.toggleFloating = toggleFloating
     self.newConversation = newConversation
+    self.attachTask = attachTask
     self.answer = answer
     self.togglePin = togglePin
     self.toggleWindowGroup = toggleWindowGroup
@@ -350,7 +366,8 @@ public struct PanelContent: View {
       if nativeEffects {
         ScrollView {
           ConversationsView(
-            snapshot: snapshot, open: open, answer: answer, togglePin: togglePin,
+            snapshot: snapshot, open: open, attachTask: attachTask, answer: answer,
+            togglePin: togglePin,
             toggleWindowGroup: toggleWindowGroup
           )
           .padding(.horizontal, 18)
@@ -369,7 +386,8 @@ public struct PanelContent: View {
         }.scrollIndicators(.hidden)
       } else {
         ConversationsView(
-          snapshot: snapshot, staticPreview: true, open: open, answer: answer, togglePin: togglePin,
+          snapshot: snapshot, staticPreview: true, open: open, attachTask: attachTask,
+          answer: answer, togglePin: togglePin,
           toggleWindowGroup: toggleWindowGroup
         )
         .padding(.horizontal, 18)

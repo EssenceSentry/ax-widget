@@ -81,6 +81,7 @@ public struct TaskProgress: Codable, Equatable, Sendable {
   public var total: Double?
   public var unit: String?
   public var stage: String?
+  public var attachableIDs: [String]?
   public var runningCount: Int
 
   public init(
@@ -104,8 +105,10 @@ public struct TaskProgress: Codable, Equatable, Sendable {
   /// Rows arrive newest first. Keep the most recent numeric progress, while
   /// counting every active job even when the newest job has no counter.
   public mutating func include(_ job: TaskProgress) {
+    let ids = (attachableIDs ?? []) + (job.attachableIDs ?? [])
     let count = runningCount + job.runningCount
     if fraction == nil && job.fraction != nil { self = job }
+    attachableIDs = ids.isEmpty ? nil : ids
     runningCount = count
   }
 }

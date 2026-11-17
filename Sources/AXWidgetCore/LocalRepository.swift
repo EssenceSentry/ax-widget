@@ -127,9 +127,14 @@ public struct LocalRepository {
           jobActivity[owner] = max(jobActivity[owner] ?? .distantPast, activity)
           if activity > found[owner]?.updated ?? .distantPast { found[owner]?.updated = activity }
         }
-        let job = TaskProgress(
+        var job = TaskProgress(
           done: row["done"] as? Double, total: row["total"] as? Double,
           unit: row["unit"] as? String, stage: row["stage"] as? String, runningCount: 1)
+        if row["kind"] as? String == "run", let id = row["id"] as? String,
+          AttachCommand.isTaskID(id)
+        {
+          job.attachableIDs = [id]
+        }
         if progress[owner] != nil {
           progress[owner]?.include(job)
         } else {

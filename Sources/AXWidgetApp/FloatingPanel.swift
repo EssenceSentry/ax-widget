@@ -211,6 +211,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
         self.setKeepFloating(!self.keepFloating)
       },
       newConversation: { [weak self] provider in self?.newConversation?(provider) },
+      attachTask: { [weak self] id in self?.attachTask(id) },
       answer: answerQuestion,
       togglePin: { [weak self] in self?.toggleConversationPin?($0) },
       toggleWindowGroup: { [weak self] in self?.toggleConversationWindow?($0) },
@@ -221,6 +222,28 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
       open: { [weak self] conversation in
         self?.openConversation?(conversation)
       })
+  }
+
+  private func attachTask(_ id: String) {
+    guard let executable = AxClient.executable(),
+      let terminal = NSWorkspace.shared.urlForApplication(
+        withBundleIdentifier: "com.apple.Terminal")
+    else {
+      store.reportGroupError(AttachCommand.Error.unavailable)
+      return
+    }
+    do {
+      let file = try AttachCommand.write(
+        id: id, executable: executable,
+        config: ProcessInfo.processInfo.environment["AX_CONFIG"])
+      NSWorkspace.shared.open([file], withApplicationAt: terminal, configuration: .init()) {
+        [weak self] _, error in
+        if let error {
+          try? FileManager.default.removeItem(at: file)
+          Task { @MainActor in self?.store.reportGroupError(error) }
+        }
+      }
+    } catch { store.reportGroupError(error) }
   }
 
   private func fitContent(_ naturalHeight: CGFloat) {

@@ -4,7 +4,9 @@ See which Claude or Codex conversation needs attention without opening every win
 
 ![Porcelain design reference showing the compact usage rings and expanded conversation panel.](docs/design/floating-porcelain.png)
 
-**Preview it on a Mac.** With the [build prerequisites](#build) installed, run `swift run AXWidget --demo --expanded` to explore the panel with synthetic conversations. For live usage, connect the [ax workbench](https://github.com/EssenceSentry/agent-skills/tree/ax-workbench). The floating app and the [small system widget](#notification-center-and-desktop-widget) have separate build requirements.
+**[Watch a job reattach in Terminal](https://github.com/EssenceSentry/ax/blob/main/docs/reattach.md)**. Open the job count in the expanded panel and choose a running command. Terminal connects to that ax process and replays its output.
+
+**Preview it on a Mac.** With the [build prerequisites](#build) installed, run `swift run AXWidget --demo --expanded` to explore the panel with synthetic conversations. For live usage, connect the [ax workbench](https://github.com/EssenceSentry/ax). The floating app and the [small system widget](#notification-center-and-desktop-widget) have separate build requirements.
 
 **Carbon**, **Porcelain**, and **Frost** share the same layout. System appearance
 is the default; choose a theme from the menu-bar icon's **Appearance** submenu.
