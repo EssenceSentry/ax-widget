@@ -266,6 +266,7 @@ public struct PanelContent: View {
   public var open: (Conversation) -> Void
   public var nativeEffects: Bool
   public var heightChanged: ((CGFloat) -> Void)?
+  public var onDrag: ((FloatingDragEvent) -> Void)?
   public var keepFloating: Bool
   public var toggleFloating: (() -> Void)?
   public var newConversation: ((Provider) -> Void)?
@@ -280,6 +281,7 @@ public struct PanelContent: View {
   @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
   public init(
     snapshot: Snapshot, nativeEffects: Bool = true, heightChanged: ((CGFloat) -> Void)? = nil,
+    onDrag: ((FloatingDragEvent) -> Void)? = nil,
     keepFloating: Bool = false, toggleFloating: (() -> Void)? = nil,
     newConversation: ((Provider) -> Void)? = nil,
     attachTask: ((String) -> Void)? = nil, answer: QuestionAnswerHandler? = nil,
@@ -293,6 +295,7 @@ public struct PanelContent: View {
     self.snapshot = snapshot
     self.nativeEffects = nativeEffects
     self.heightChanged = heightChanged
+    self.onDrag = onDrag
     self.keepFloating = keepFloating
     self.toggleFloating = toggleFloating
     self.newConversation = newConversation
@@ -311,8 +314,14 @@ public struct PanelContent: View {
     VStack(spacing: 0) {
       ZStack {
         Capsule().fill(palette.secondary.opacity(0.35)).frame(width: 21, height: 3)
-        HStack {
-          Spacer()
+        HStack(spacing: 0) {
+          if let onDrag {
+            FloatingDragSurface(handle: onDrag)
+              .frame(maxWidth: .infinity, maxHeight: .infinity)
+              .help("Drag to move the widget").accessibilityHidden(true)
+          } else {
+            Spacer()
+          }
           Button(action: collapse) { Image(systemName: "chevron.down").font(.system(size: 10)) }
             .buttonStyle(.plain).foregroundStyle(palette.secondary).help("Collapse · Esc")
         }

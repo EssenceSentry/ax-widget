@@ -104,30 +104,38 @@ public struct ProviderGauge: View {
 public struct CollapsedView: View {
   public var snapshot: Snapshot
   public var nativeEffects: Bool
+  public var onDrag: ((FloatingDragEvent) -> Void)?
   public var showGroup: (() -> Void)?
   public var minimizeGroup: (() -> Void)?
   public var arrangeGroup: (() -> Void)?
   @Environment(\.colorScheme) private var scheme
   public init(
-    snapshot: Snapshot, nativeEffects: Bool = true, showGroup: (() -> Void)? = nil,
+    snapshot: Snapshot, nativeEffects: Bool = true, onDrag: ((FloatingDragEvent) -> Void)? = nil,
+    showGroup: (() -> Void)? = nil,
     minimizeGroup: (() -> Void)? = nil, arrangeGroup: (() -> Void)? = nil
   ) {
     self.snapshot = snapshot
     self.nativeEffects = nativeEffects
+    self.onDrag = onDrag
     self.showGroup = showGroup
     self.minimizeGroup = minimizeGroup
     self.arrangeGroup = arrangeGroup
   }
   public var body: some View {
     let palette = Palette(snapshot.appearance, scheme: scheme)
-    HStack(spacing: 8) {
-      ForEach(Provider.allCases) { provider in
-        ProviderGauge(
-          provider, snapshot: snapshot, palette: palette,
-          attention: snapshot.conversations.contains {
-            $0.provider == provider && $0.needsAttention
-          })
-      }
+    HStack(spacing: 0) {
+      HStack(spacing: 8) {
+        ForEach(Provider.allCases) { provider in
+          ProviderGauge(
+            provider, snapshot: snapshot, palette: palette,
+            attention: snapshot.conversations.contains {
+              $0.provider == provider && $0.needsAttention
+            })
+        }
+      }.padding(4)
+        .overlay {
+          if let onDrag { FloatingDragSurface(handle: onDrag).accessibilityHidden(true) }
+        }
       if snapshot.windowGroupConversationIDs?.isEmpty == false {
         Button {
           showGroup?()
@@ -141,8 +149,9 @@ public struct CollapsedView: View {
             Button("Minimize group") { minimizeGroup?() }
             Button("Arrange side by side") { arrangeGroup?() }
           }
+          .padding(.horizontal, 4)
       }
-    }.padding(4)
+    }
       .background {
         if palette.frost {
           if !nativeEffects { Capsule().fill(palette.background) }

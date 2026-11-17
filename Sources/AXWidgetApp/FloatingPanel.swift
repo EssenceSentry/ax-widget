@@ -10,32 +10,6 @@ private final class UtilityPanel: NSPanel {
   override func cancelOperation(_ sender: Any?) { (delegate as? FloatingController)?.collapse() }
 }
 
-private final class CollapsedHost: NSHostingView<CollapsedView> {
-  var clicked: (() -> Void)?
-  var moved: (() -> Void)?
-  var hasGroup = false
-  override var acceptsFirstResponder: Bool { true }
-  override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-  override func mouseDown(with event: NSEvent) {
-    if hasGroup && convert(event.locationInWindow, from: nil).x >= 96 {
-      super.mouseDown(with: event)
-      return
-    }
-    guard let window else { return }
-    while let next = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged]) {
-      if next.type == .leftMouseDragged {
-        window.performDrag(with: next)
-        moved?()
-        return
-      }
-      if next.type == .leftMouseUp {
-        clicked?()
-        return
-      }
-    }
-  }
-}
-
 @MainActor final class FloatingController: NSObject, NSWindowDelegate {
   let store: AppStore
   private let panel: UtilityPanel
@@ -48,6 +22,8 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   var keepFloating: Bool { presentation.keepFloating }
   private var contentHeight: CGFloat = 0
   private var collapsedOrigin: NSPoint
+  private var dragOrigin: NSPoint?
+  private var detailsOffsetX: CGFloat?
   var openConversation: ((Conversation) -> Void)?
   var newConversation: ((Provider) -> Void)?
   var answerQuestion: QuestionAnswerHandler?
@@ -66,11 +42,12 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     let defaults = UserDefaults.standard
     presentation = FloatingPresentation(
       keepFloating: defaults.object(forKey: "showFloating") as? Bool ?? false)
-    let x = defaults.object(forKey: "floatingX") as? Double ?? screen.maxX - 116
+    let width: CGFloat = store.group.pins.isEmpty ? 96 : 128
+    let x = defaults.object(forKey: "floatingX") as? Double ?? screen.maxX - width - 20
     let y = defaults.object(forKey: "floatingY") as? Double ?? screen.midY
     collapsedOrigin = NSPoint(x: x, y: y)
     panel = UtilityPanel(
-      contentRect: NSRect(origin: collapsedOrigin, size: NSSize(width: 96, height: 48)),
+      contentRect: NSRect(origin: collapsedOrigin, size: NSSize(width: width, height: 48)),
       styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
     details = UtilityPanel(
       contentRect: NSRect(x: x, y: y, width: 420, height: 1),
@@ -133,6 +110,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     guard !expanded else { return }
     collapsedOrigin = panel.frame.origin
     presentation.open()
+    detailsOffsetX = nil
     let measurement = NSHostingView(
       rootView: ConversationsView(
         snapshot: store.snapshot, open: { _ in }, togglePin: { _ in }, toggleWindowGroup: { _ in }
@@ -145,13 +123,13 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   }
 
   func collapse() {
+    dragOrigin = nil
     presentation.close()
     details.orderOut(nil)
     let screen =
       panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
       ?? NSRect(x: 0, y: 0, width: 1280, height: 800)
-    collapsedOrigin.x = min(max(collapsedOrigin.x, screen.minX + 8), screen.maxX - pillWidth - 8)
-    collapsedOrigin.y = min(max(collapsedOrigin.y, screen.minY + 8), screen.maxY - 56)
+    collapsedOrigin = constrained(collapsedOrigin, to: screen)
     panel.setFrame(
       NSRect(origin: collapsedOrigin, size: NSSize(width: pillWidth, height: 48)), display: true)
     update(store.snapshot)
@@ -165,24 +143,17 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
       frame.size.width = pillWidth
       panel.setFrame(frame, display: true)
       collapsedOrigin.x = frame.minX
+      if expanded { detailsOffsetX = details.frame.minX - frame.minX }
     }
     let root = CollapsedView(
-      snapshot: snapshot,
+      snapshot: snapshot, onDrag: { [weak self] in self?.handleDrag($0, fromPill: true) },
       showGroup: { [weak self] in self?.showGroup?() },
       minimizeGroup: { [weak self] in self?.minimizeGroup?() },
       arrangeGroup: { [weak self] in self?.arrangeGroup?() })
-    if let host = panel.contentView as? CollapsedHost {
+    if let host = panel.contentView as? NSHostingView<CollapsedView> {
       host.rootView = root
-      host.hasGroup = !store.group.pins.isEmpty
     } else {
-      let host = CollapsedHost(rootView: root)
-      host.hasGroup = !store.group.pins.isEmpty
-      host.clicked = { [weak self] in
-        guard let self else { return }
-        if self.expanded { self.collapse() } else { self.expand() }
-      }
-      host.moved = { [weak self] in self?.rememberPosition() }
-      panel.contentView = host
+      panel.contentView = NSHostingView(rootView: root)
     }
     if expanded {
       if let host = details.contentView as? NSHostingView<PanelContent> {
@@ -205,6 +176,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   private func content(_ snapshot: Snapshot) -> PanelContent {
     PanelContent(
       snapshot: snapshot, heightChanged: { [weak self] height in self?.fitContent(height) },
+      onDrag: { [weak self] in self?.handleDrag($0, fromPill: false) },
       keepFloating: keepFloating,
       toggleFloating: { [weak self] in
         guard let self else { return }
@@ -246,9 +218,9 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     } catch { store.reportGroupError(error) }
   }
 
-  private func fitContent(_ naturalHeight: CGFloat) {
+  private func fitContent(_ naturalHeight: CGFloat, on display: NSScreen? = nil) {
     guard expanded, naturalHeight.isFinite, naturalHeight > 0,
-      let screen = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+      let screen = (display ?? panel.screen ?? NSScreen.main)?.visibleFrame
     else { return }
     contentHeight = naturalHeight
     let gap: CGFloat = 8
@@ -259,7 +231,10 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
       panel.setFrameOrigin(NSPoint(x: panel.frame.minX, y: requiredY))
     }
     let height = min(naturalHeight, panel.frame.minY - gap - screen.minY - 12)
-    let x = min(max(screen.minX + 12, panel.frame.maxX - 420), screen.maxX - 432)
+    // Keep the grip under the pointer when dragging away from a display edge.
+    let desiredX = panel.frame.minX + (detailsOffsetX ?? (panel.frame.width - 420))
+    let x = min(max(screen.minX + 12, desiredX), screen.maxX - 432)
+    detailsOffsetX = x - panel.frame.minX
     let frame = NSRect(x: x, y: panel.frame.minY - gap - height, width: 420, height: height)
     if details.frame != frame {
       details.setFrame(frame, display: true)
@@ -278,10 +253,31 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     }
   }
 
-  private func rememberPosition() {
-    collapsedOrigin = panel.frame.origin
-    UserDefaults.standard.set(collapsedOrigin.x, forKey: "floatingX")
-    UserDefaults.standard.set(collapsedOrigin.y, forKey: "floatingY")
-    if expanded { fitContent(contentHeight) }
+  private func handleDrag(_ event: FloatingDragEvent, fromPill: Bool) {
+    switch event {
+    case .clicked:
+      if fromPill { toggle() }
+    case .began:
+      dragOrigin = panel.frame.origin
+    case .moved(let translation):
+      guard let dragOrigin else { return }
+      let origin = NSPoint(x: dragOrigin.x + translation.width, y: dragOrigin.y + translation.height)
+      let center = NSPoint(x: origin.x + panel.frame.width / 2, y: origin.y + panel.frame.height / 2)
+      guard let screen = NSScreen.screens.first(where: { $0.frame.contains(center) })
+        ?? panel.screen ?? NSScreen.main else { return }
+      panel.setFrameOrigin(constrained(origin, to: screen.visibleFrame))
+      if expanded { fitContent(contentHeight, on: screen) }
+    case .ended:
+      dragOrigin = nil
+      collapsedOrigin = panel.frame.origin
+      UserDefaults.standard.set(collapsedOrigin.x, forKey: "floatingX")
+      UserDefaults.standard.set(collapsedOrigin.y, forKey: "floatingY")
+    }
+  }
+
+  private func constrained(_ point: NSPoint, to screen: NSRect) -> NSPoint {
+    NSPoint(
+      x: min(max(point.x, screen.minX + 8), screen.maxX - pillWidth - 8),
+      y: min(max(point.y, screen.minY + 8), screen.maxY - 56))
   }
 }
