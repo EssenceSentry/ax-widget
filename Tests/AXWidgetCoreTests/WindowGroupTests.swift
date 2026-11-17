@@ -177,3 +177,31 @@ private func chat(_ index: Int, date: Date = Date()) -> Conversation {
   #expect(ClaudeWindowIdentity.title(desktopSessionID: "local_missing", paths: paths) == nil)
   #expect(ClaudeWindowIdentity.title(desktopSessionID: "../../invalid", paths: paths) == nil)
 }
+
+@Test func removedWindowMaximizesOnItsOwnDisplayAndRespectsDesktopInsets() throws {
+  let left = CGRect(x: -1920, y: -600, width: 1920, height: 1080)
+  let main = CGRect(x: 80, y: 33, width: 1432, height: 949)
+  let window = CGRect(x: -700, y: -400, width: 500, height: 800)
+  #expect(
+    try ConversationWindowLayout.maximizedFrame(for: window, visibleFrames: [main, left]) == left)
+  let primary = CGRect(x: 600, y: 39, width: 496, height: 937)
+  #expect(
+    try ConversationWindowLayout.maximizedFrame(for: primary, visibleFrames: [left, main]) == main)
+  let across = CGRect(x: -100, y: 100, width: 800, height: 600)
+  #expect(
+    try ConversationWindowLayout.maximizedFrame(for: across, visibleFrames: [left, main]) == main)
+  let offscreen = CGRect(x: 4000, y: 3000, width: 500, height: 600)
+  #expect(
+    try ConversationWindowLayout.maximizedFrame(for: offscreen, visibleFrames: [left, main]) == main
+  )
+}
+
+@Test func maximizingRejectsMissingDisplaysAndInvalidWindowGeometry() {
+  let window = CGRect(x: 0, y: 33, width: 500, height: 700)
+  #expect(throws: WindowGroupError.self) {
+    try ConversationWindowLayout.maximizedFrame(for: window, visibleFrames: [])
+  }
+  #expect(throws: WindowGroupError.self) {
+    try ConversationWindowLayout.maximizedFrame(for: .zero, visibleFrames: [window])
+  }
+}

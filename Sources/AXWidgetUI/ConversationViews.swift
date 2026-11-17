@@ -109,7 +109,11 @@ public struct ConversationsView: View {
               .font(.system(size: 10)).foregroundStyle(grouped ? palette.blue : palette.secondary)
               .frame(width: 14, height: 16)
           }.buttonStyle(.plain).disabled(snapshot.isDemo || snapshot.windowGroupBusy == true)
-            .help(grouped ? "Remove window from group" : "Open in window group (up to three)")
+            .help(
+              grouped
+                ? "Remove from group and maximize this window"
+                : "Open in window group (up to three)"
+            )
             .accessibilityLabel(
               "\(grouped ? "Remove from window group" : "Add to window group"): \(conversation.title)"
             )

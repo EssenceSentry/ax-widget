@@ -106,8 +106,11 @@ sidebar collapsed (its slim navigation rail remains). The separate toolbar pin s
   Membership changes arrange the group again. If the apps' minimum window sizes do not
   fit, the previous frames are restored and the panel explains the problem.
   Layout adapts to different native minimum widths instead of assuming equal minima.
-- Removing a window from the group leaves it open and does not change its widget
-  pin. Unpinning from the widget does not remove its window from the group.
+- Removing a window from the group maximizes it on its current display, then
+  rearranges and raises the remaining group in front of it. Maximizing fills the
+  usable desktop area, respecting the Dock and menu bar, without entering a
+  full-screen Space. A closed window stays closed. Its widget pin is unchanged;
+  unpinning from the widget does not remove its window from the group.
   Both selections survive widget restarts. Restoring group references never
   launches provider apps until you request Show group. No chat contents are stored
   in preferences.

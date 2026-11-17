@@ -122,6 +122,32 @@ public enum ConversationWindowLayout {
       return CGRect(x: x, y: inset.minY, width: width, height: inset.height)
     }
   }
+  /// Fill the usable area of the display containing most of the window. Visible
+  /// frames exclude the Dock and menu bar; this never creates a full-screen Space.
+  public static func maximizedFrame(for window: CGRect, visibleFrames: [CGRect]) throws -> CGRect {
+    func valid(_ rect: CGRect) -> Bool {
+      rect.minX.isFinite && rect.minY.isFinite && rect.width.isFinite && rect.height.isFinite
+        && rect.width > 0 && rect.height > 0
+    }
+    guard valid(window) else { throw WindowGroupError.cannotFit }
+    let screens = visibleFrames.filter { valid($0) && $0.width >= 320 && $0.height >= 300 }
+    func area(_ rect: CGRect) -> CGFloat {
+      let overlap = rect.intersection(window)
+      return overlap.isNull ? 0 : overlap.width * overlap.height
+    }
+    func distance(_ rect: CGRect) -> CGFloat {
+      let dx = rect.midX - window.midX
+      let dy = rect.midY - window.midY
+      return dx * dx + dy * dy
+    }
+    guard
+      let screen = screens.max(by: {
+        area($0) == area($1) ? distance($0) > distance($1) : area($0) < area($1)
+      })
+    else { throw WindowGroupError.cannotFit }
+    return screen
+  }
+
   public static func accessibilityRect(_ rect: CGRect, primaryTop: CGFloat) -> CGRect {
     CGRect(x: rect.minX, y: primaryTop - rect.maxY, width: rect.width, height: rect.height)
   }

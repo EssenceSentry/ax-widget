@@ -182,25 +182,42 @@ import Foundation
   private func toggleWindowGroup(_ conversation: Conversation) {
     guard !store.demo, !groupOperation else { return }
     var group = store.group
-    if group.pins.contains(where: { $0.id == conversation.id }) {
+    if let removed = group.pins.first(where: { $0.id == conversation.id }) {
       group.remove(conversation.id)
-      conversationWindows.forget(conversation.id)
-      store.setGroup(group)
-      store.reportGroupError(nil)
-      if !group.pins.isEmpty { showConversationGroup(arrange: true) }
+      groupOperation = true
+      Task {
+        defer { groupOperation = false }
+        floating.collapse()
+        do {
+          try await conversationWindows.maximizeIfPresent(removed)
+          conversationWindows.forget(removed.id)
+          store.setGroup(group)
+          // The expanded window must be behind the remaining group. Raising
+          // the remaining windows is intentionally the final native action.
+          if !group.pins.isEmpty {
+            try await conversationWindows.show(
+              group.pins, screen: floating.groupScreen, arrange: true)
+          }
+          store.reportGroupError(nil)
+        } catch {
+          store.reportGroupError(error)
+          floating.expand()
+          if !ClaudeQuestionClient.isTrusted { enableClaudeReplies() }
+        }
+      }
     } else {
       do {
         try group.add(conversation)
         groupOperation = true
         Task {
           defer { groupOperation = false }
+          floating.collapse()
           do {
             try await conversationWindows.show(
               group.pins, screen: floating.groupScreen,
               arrange: true)
             store.setGroup(group)
             store.reportGroupError(nil)
-            floating.collapse()
           } catch {
             conversationWindows.forget(conversation.id)
             store.reportGroupError(error)
@@ -217,12 +234,12 @@ import Foundation
     groupOperation = true
     Task {
       defer { groupOperation = false }
+      floating.collapse()
       do {
         try await conversationWindows.show(
           store.group.pins, screen: floating.groupScreen,
           arrange: arrange)
         store.reportGroupError(nil)
-        floating.collapse()
       } catch {
         store.reportGroupError(error)
         floating.expand()
@@ -233,10 +250,10 @@ import Foundation
 
   private func minimizeConversationGroup() {
     guard !store.demo, !groupOperation else { return }
+    floating.collapse()
     do {
       try conversationWindows.minimize(store.group.pins)
       store.reportGroupError(nil)
-      floating.collapse()
     } catch {
       store.reportGroupError(error)
       floating.expand()

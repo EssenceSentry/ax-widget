@@ -168,6 +168,66 @@ import ApplicationServices
     return condition()
   }
 
+  /// Expand only the registered group window. Closing it before removal must
+  /// not create a new window or resize an unrelated provider window.
+  func maximizeIfPresent(_ pin: ConversationPin) async throws {
+    guard !busy else { return }
+    guard AXIsProcessTrusted() else { throw WindowGroupError.accessibility }
+    var binding = bindings[pin.id].flatMap { valid($0) ? $0 : nil }
+    if binding == nil,
+      let app = NSRunningApplication.runningApplications(
+        withBundleIdentifier: pin.provider.bundleIdentifier
+      ).first
+    {
+      if let window = existing(pin, pid: app.processIdentifier) {
+        binding = Binding(pin: pin, pid: app.processIdentifier, window: window)
+      } else {
+        let matches = WindowAX.windows(app.processIdentifier).filter {
+          WindowAX.matches($0, pin: pin)
+            && (pin.provider != .claude || WindowAX.isClaudePopout($0, pin: pin))
+        }
+        if matches.count > 1 { throw WindowGroupError.ambiguous }
+      }
+    }
+    guard let binding else { return }
+    guard let original = WindowAX.frame(binding.window), let primary = NSScreen.screens.first
+    else { throw WindowGroupError.cannotFit }
+    let target = try ConversationWindowLayout.maximizedFrame(
+      for: original,
+      visibleFrames: NSScreen.screens.map {
+        ConversationWindowLayout.accessibilityRect($0.visibleFrame, primaryTop: primary.frame.maxY)
+      })
+    let wasMinimized = WindowAX.value(binding.window, kAXMinimizedAttribute) as? Bool ?? false
+    busy = true
+    defer { busy = false }
+    do {
+      try raise(binding)
+      NSRunningApplication(processIdentifier: binding.pid)?.activate(options: [])
+      AXUIElementSetAttributeValue(
+        AXUIElementCreateApplication(binding.pid),
+        kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+      let deadline = Date().addingTimeInterval(3)
+      repeat {
+        guard valid(binding) else { throw WindowGroupError.changed }
+        try WindowAX.setFrame(binding.window, target)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        if Bookmark(target).matches(WindowAX.frame(binding.window)) {
+          bindings[pin.id] = binding
+          remember()
+          return
+        }
+      } while Date() < deadline
+      throw WindowGroupError.unavailable(
+        "The removed window could not be expanded to the display's usable area.")
+    } catch {
+      try? WindowAX.setFrame(binding.window, original)
+      AXUIElementSetAttributeValue(
+        binding.window, kAXMinimizedAttribute as CFString,
+        wasMinimized ? kCFBooleanTrue : kCFBooleanFalse)
+      throw error
+    }
+  }
+
   func forget(_ id: String) {
     bindings.removeValue(forKey: id)
     bookmarks.removeValue(forKey: id)
