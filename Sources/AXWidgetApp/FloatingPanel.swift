@@ -52,6 +52,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
   var newConversation: ((Provider) -> Void)?
   var answerQuestion: QuestionAnswerHandler?
   var toggleConversationPin: ((Conversation) -> Void)?
+  var toggleConversationWindow: ((Conversation) -> Void)?
   var showGroup: (() -> Void)?
   var minimizeGroup: (() -> Void)?
   var arrangeGroup: (() -> Void)?
@@ -133,8 +134,10 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
     collapsedOrigin = panel.frame.origin
     presentation.open()
     let measurement = NSHostingView(
-      rootView: ConversationsView(snapshot: store.snapshot, open: { _ in })
-        .frame(width: 384).fixedSize(horizontal: false, vertical: true))
+      rootView: ConversationsView(
+        snapshot: store.snapshot, open: { _ in }, togglePin: { _ in }, toggleWindowGroup: { _ in }
+      )
+      .frame(width: 384).fixedSize(horizontal: false, vertical: true))
     fitContent(measurement.fittingSize.height + 27 + PanelContent.headerHeight)
     update(store.snapshot)
     panel.orderFrontRegardless()
@@ -210,6 +213,7 @@ private final class CollapsedHost: NSHostingView<CollapsedView> {
       newConversation: { [weak self] provider in self?.newConversation?(provider) },
       answer: answerQuestion,
       togglePin: { [weak self] in self?.toggleConversationPin?($0) },
+      toggleWindowGroup: { [weak self] in self?.toggleConversationWindow?($0) },
       showGroup: { [weak self] in self?.showGroup?() },
       minimizeGroup: { [weak self] in self?.minimizeGroup?() },
       arrangeGroup: { [weak self] in self?.arrangeGroup?() },

@@ -32,7 +32,11 @@ are included. There is no brand/count header and no built-in chat editor.
   limited to the last 12 hours. Opening a chat, changing its settings, or refreshing
   usage does not count as activity. Unpinned chats need a recorded activity timestamp;
   provider metadata alone cannot make an old chat recent.
-  Pinned conversations remain first, in pin order, even after 12 hours.
+  Use the pushpin beside a title to keep that conversation in the widget after
+  12 hours. Saved conversations remain first, in pin order, followed by up to
+  eight other recent chats. Widget pins persist across restarts and have no
+  three-window limit. Pinning to the widget requires no Accessibility permission
+  and does not open or arrange a provider window.
 - The expanded panel shows the latest original agent prose, not tool logs or an
   invented summary. **More** appears only when the rendered preview actually
   clips content, and expands the text in place. The panel grows and shrinks
@@ -77,27 +81,32 @@ are included. There is no brand/count header and no built-in chat editor.
 
 ## Conversation window group
 
-Pin up to three conversations using the pin beside each title. Each pin opens
-that exact conversation in its own native Claude or Codex window and arranges the
-group side by side on the widget's display. Claude uses its compact, sidebar-free
+Use the overlapping-windows icon beside a title to add up to three conversations
+to a window group. This opens that exact conversation in its own native Claude or
+Codex window and arranges the group side by side on the widget's display. Claude uses its compact, sidebar-free
 conversation pop-outs. Codex uses separate native windows with the conversation
 sidebar collapsed (its slim navigation rail remains). The separate toolbar pin still means
 **Keep floating**; it does not pin a conversation.
 
-- **Show group** (overlapping rectangles) restores and raises all pinned windows
+- **Show group** (overlapping rectangles) restores and raises all grouped windows
   with one click. It is available in the expanded panel, the floating pill when
   enabled, and the menu-bar menu. Switch to Slack or any other app normally;
   click Show group when you want all the conversations back.
-- **Minimize group** minimizes only the pinned windows. Other windows belonging
+- **Minimize group** minimizes only the grouped windows. Other windows belonging
   to Claude and Codex are left alone.
 - **Arrange side by side** is in the group button's context menu and menu-bar
   menu. Normal Show group preserves any positions and sizes you adjust manually.
-  Pin changes arrange the group again. If the apps' minimum window sizes do not
+  Membership changes arrange the group again. If the apps' minimum window sizes do not
   fit, the previous frames are restored and the panel explains the problem.
   Layout adapts to different native minimum widths instead of assuming equal minima.
-- Unpinning leaves the conversation open and removes it from group control.
-  Pin references survive widget restarts; restoring them never launches provider
-  apps until you request Show group. No chat contents are stored in preferences.
+- Removing a window from the group leaves it open and does not change its widget
+  pin. Unpinning from the widget does not remove its window from the group.
+  Both selections survive widget restarts. Restoring group references never
+  launches provider apps until you request Show group. No chat contents are stored
+  in preferences.
+- Upgrading from the original combined control preserves existing selections as
+  both widget pins and window-group members. Subsequent changes are independent.
+  The menu-bar menu has separate **Pinned to widget** and **Grouped windows** lists.
 
 These are ordinary app windows, without an always-on-top level. Group control
 requires macOS Accessibility access for AX Widget. It uses native conversation

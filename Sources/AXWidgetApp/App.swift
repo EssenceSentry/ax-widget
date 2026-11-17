@@ -20,7 +20,8 @@ import Foundation
     floating = FloatingController(store: store)
     floating.openConversation = { [weak self] conversation in self?.open(conversation) }
     floating.newConversation = { [weak self] provider in self?.startConversation(provider) }
-    floating.toggleConversationPin = { [weak self] in self?.togglePin($0) }
+    floating.toggleConversationPin = { [weak self] in self?.toggleWidgetPin($0) }
+    floating.toggleConversationWindow = { [weak self] in self?.toggleWindowGroup($0) }
     floating.showGroup = { [weak self] in self?.showConversationGroup() }
     floating.minimizeGroup = { [weak self] in self?.minimizeConversationGroup() }
     floating.arrangeGroup = { [weak self] in self?.showConversationGroup(arrange: true) }
@@ -78,6 +79,18 @@ import Foundation
     let entry = menu.addItem(withTitle: "Appearance", action: nil, keyEquivalent: "")
     entry.submenu = appearance
     menu.addItem(.separator())
+    if !store.widgetPins.pins.isEmpty {
+      let saved = NSMenu()
+      for pin in store.widgetPins.pins {
+        let item = saved.addItem(
+          withTitle: "Unpin \(pin.title)", action: #selector(unpinWidgetMenu(_:)), keyEquivalent: ""
+        )
+        item.target = self
+        item.representedObject = pin.id
+      }
+      menu.addItem(withTitle: "Pinned to widget", action: nil, keyEquivalent: "").submenu = saved
+      menu.addItem(.separator())
+    }
     if !store.group.pins.isEmpty {
       for (title, action) in [
         ("Show conversation group", #selector(showGroupMenu)),
@@ -89,11 +102,12 @@ import Foundation
       let pins = NSMenu()
       for pin in store.group.pins {
         let item = pins.addItem(
-          withTitle: "Unpin \(pin.title)", action: #selector(unpinMenu(_:)), keyEquivalent: "")
+          withTitle: "Remove \(pin.title)", action: #selector(removeWindowMenu(_:)),
+          keyEquivalent: "")
         item.target = self
         item.representedObject = pin.id
       }
-      menu.addItem(withTitle: "Pinned conversations", action: nil, keyEquivalent: "").submenu = pins
+      menu.addItem(withTitle: "Grouped windows", action: nil, keyEquivalent: "").submenu = pins
       menu.addItem(.separator())
     }
     let widgets = menu.addItem(
@@ -140,14 +154,32 @@ import Foundation
   @objc private func showGroupMenu() { showConversationGroup() }
   @objc private func minimizeGroupMenu() { minimizeConversationGroup() }
   @objc private func arrangeGroupMenu() { showConversationGroup(arrange: true) }
-  @objc private func unpinMenu(_ item: NSMenuItem) {
+  @objc private func unpinWidgetMenu(_ item: NSMenuItem) {
+    guard let id = item.representedObject as? String,
+      let pin = store.widgetPins.pins.first(where: { $0.id == id })
+    else { return }
+    toggleWidgetPin(pin.conversation)
+  }
+
+  private func toggleWidgetPin(_ conversation: Conversation) {
+    guard !store.demo else { return }
+    var pins = store.widgetPins
+    if pins.pins.contains(where: { $0.id == conversation.id }) {
+      pins.remove(conversation.id)
+    } else {
+      pins.add(conversation)
+    }
+    store.setWidgetPins(pins)
+  }
+
+  @objc private func removeWindowMenu(_ item: NSMenuItem) {
     guard let id = item.representedObject as? String,
       let pin = store.group.pins.first(where: { $0.id == id })
     else { return }
-    togglePin(pin.conversation)
+    toggleWindowGroup(pin.conversation)
   }
 
-  private func togglePin(_ conversation: Conversation) {
+  private func toggleWindowGroup(_ conversation: Conversation) {
     guard !store.demo, !groupOperation else { return }
     var group = store.group
     if group.pins.contains(where: { $0.id == conversation.id }) {

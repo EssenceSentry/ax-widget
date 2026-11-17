@@ -58,7 +58,7 @@ public enum WindowGroupError: LocalizedError {
   case ambiguous, cannotFit, changed
   public var errorDescription: String? {
     switch self {
-    case .full: return "Pin up to three conversations. Unpin one before adding another."
+    case .full: return "Group up to three conversation windows. Remove one before adding another."
     case .unregistered: return "This conversation has no Desktop registration yet."
     case .accessibility:
       return

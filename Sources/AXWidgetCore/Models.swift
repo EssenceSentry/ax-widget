@@ -183,6 +183,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
   public var appearance: Appearance
   public var isDemo: Bool
   public var pinnedConversationIDs: [String]?
+  public var windowGroupConversationIDs: [String]?
   public var windowGroupBusy: Bool?
 
   public init(

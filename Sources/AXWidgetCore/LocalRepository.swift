@@ -26,9 +26,9 @@ public struct LocalRepository {
   {
     let cutoff = date.addingTimeInterval(-12 * 3600)
     var found: [String: Conversation] = [:]
-    let group = ConversationGroup(pins: pins)
-    let pinnedIDs = Set(group.pins.map(\.id))
-    for pin in group.pins { found[pin.id] = pin.conversation }
+    let saved = WidgetConversationPins(pins: pins)
+    let pinnedIDs = Set(saved.pins.map(\.id))
+    for pin in saved.pins { found[pin.id] = pin.conversation }
     var issues: [String] = []
     var excluded: Set<String> = []
     let catalog = paths.axData.appendingPathComponent("catalog.sqlite3")
@@ -63,7 +63,7 @@ public struct LocalRepository {
         for archived in try db.rows("SELECT id FROM threads WHERE archived=1") {
           if let id = archived["id"] { excluded.insert("codex:" + id) }
         }
-        let selectedPins = group.pins.filter { $0.provider == .codex }.map(\.sessionID)
+        let selectedPins = saved.pins.filter { $0.provider == .codex }.map(\.sessionID)
         let pinnedRows =
           selectedPins.isEmpty
           ? []
@@ -192,7 +192,7 @@ public struct LocalRepository {
       }
       if item.updated >= cutoff || pinnedIDs.contains(item.id) { items.append(item) }
     }
-    return (group.ordered(items, limit: limit), issues)
+    return (saved.ordered(items, limit: limit), issues)
   }
 
   func desktopRecords() -> [[String: Any]] {

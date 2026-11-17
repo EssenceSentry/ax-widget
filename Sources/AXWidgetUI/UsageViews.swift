@@ -128,13 +128,13 @@ public struct CollapsedView: View {
             $0.provider == provider && $0.needsAttention
           })
       }
-      if snapshot.pinnedConversationIDs?.isEmpty == false {
+      if snapshot.windowGroupConversationIDs?.isEmpty == false {
         Button {
           showGroup?()
         } label: {
           Image(systemName: "rectangle.on.rectangle").font(.system(size: 13, weight: .medium))
             .foregroundStyle(palette.foreground).frame(width: 24, height: 40)
-        }.buttonStyle(.plain).help("Bring all pinned conversations forward")
+        }.buttonStyle(.plain).help("Bring all grouped conversation windows forward")
           .accessibilityLabel("Show conversation group")
           .contextMenu {
             Button("Show group") { showGroup?() }

@@ -24,13 +24,15 @@ public struct ConversationsView: View {
   public var open: ((Conversation) -> Void)?
   public var answer: QuestionAnswerHandler?
   public var togglePin: ((Conversation) -> Void)?
+  public var toggleWindowGroup: ((Conversation) -> Void)?
   @Environment(\.colorScheme) private var scheme
   @StateObject private var presentation = ExpansionState()
 
   public init(
     snapshot: Snapshot, compact: Bool = false, staticPreview: Bool = false,
     open: ((Conversation) -> Void)? = nil,
-    answer: QuestionAnswerHandler? = nil, togglePin: ((Conversation) -> Void)? = nil
+    answer: QuestionAnswerHandler? = nil, togglePin: ((Conversation) -> Void)? = nil,
+    toggleWindowGroup: ((Conversation) -> Void)? = nil
   ) {
     self.snapshot = snapshot
     self.compact = compact
@@ -38,6 +40,7 @@ public struct ConversationsView: View {
     self.open = open
     self.answer = answer
     self.togglePin = togglePin
+    self.toggleWindowGroup = toggleWindowGroup
   }
 
   public var body: some View {
@@ -54,8 +57,7 @@ public struct ConversationsView: View {
             .font(.system(size: 12)).foregroundStyle(palette.secondary)
         }.padding(.vertical, 20)
       }
-      ForEach(Array(snapshot.conversations.prefix(compact ? 3 : 8).enumerated()), id: \.element.id)
-      { index, conversation in
+      ForEach(Array(visibleConversations.enumerated()), id: \.element.id) { index, conversation in
         if index > 0 { palette.separator.frame(height: 1).padding(.vertical, compact ? 9 : 14) }
         conversationRow(conversation, featured: index == 0, palette: palette)
       }
@@ -68,6 +70,10 @@ public struct ConversationsView: View {
       }
     }.foregroundStyle(palette.foreground)
       .preferredColorScheme(snapshot.appearance.colorScheme)
+  }
+
+  private var visibleConversations: [Conversation] {
+    compact ? Array(snapshot.conversations.prefix(3)) : snapshot.conversations
   }
 
   private func conversationRow(_ conversation: Conversation, featured: Bool, palette: Palette)
@@ -85,13 +91,25 @@ public struct ConversationsView: View {
           } label: {
             Image(systemName: pinned ? "pin.fill" : "pin")
               .font(.system(size: 10)).foregroundStyle(pinned ? palette.blue : palette.secondary)
+              .frame(width: 14, height: 16)
+          }.buttonStyle(.plain).disabled(snapshot.isDemo)
+            .help(pinned ? "Unpin from widget" : "Keep in widget after 12 hours")
+            .accessibilityLabel(
+              "\(pinned ? "Unpin from widget" : "Pin to widget"): \(conversation.title)")
+        }
+        if let toggleWindowGroup {
+          let grouped = snapshot.windowGroupConversationIDs?.contains(conversation.id) == true
+          Button {
+            toggleWindowGroup(conversation)
+          } label: {
+            Image(systemName: grouped ? "rectangle.on.rectangle.fill" : "rectangle.on.rectangle")
+              .font(.system(size: 10)).foregroundStyle(grouped ? palette.blue : palette.secondary)
+              .frame(width: 14, height: 16)
           }.buttonStyle(.plain).disabled(snapshot.isDemo || snapshot.windowGroupBusy == true)
-            .help(
-              pinned
-                ? "Remove from window group; leave the conversation open"
-                : "Pin conversation in a group of up to three windows"
+            .help(grouped ? "Remove window from group" : "Open in window group (up to three)")
+            .accessibilityLabel(
+              "\(grouped ? "Remove from window group" : "Add to window group"): \(conversation.title)"
             )
-            .accessibilityLabel("\(pinned ? "Unpin" : "Pin") conversation: \(conversation.title)")
         }
         if let count = conversation.progress?.runningCount, count > 0 {
           Label("\(count)", systemImage: "terminal")
@@ -235,6 +253,7 @@ public struct PanelContent: View {
   public var newConversation: ((Provider) -> Void)?
   public var answer: QuestionAnswerHandler?
   public var togglePin: ((Conversation) -> Void)?
+  public var toggleWindowGroup: ((Conversation) -> Void)?
   public var showGroup: (() -> Void)?
   public var minimizeGroup: (() -> Void)?
   public var arrangeGroup: (() -> Void)?
@@ -246,6 +265,7 @@ public struct PanelContent: View {
     newConversation: ((Provider) -> Void)? = nil,
     answer: QuestionAnswerHandler? = nil,
     togglePin: ((Conversation) -> Void)? = nil,
+    toggleWindowGroup: ((Conversation) -> Void)? = nil,
     showGroup: (() -> Void)? = nil, minimizeGroup: (() -> Void)? = nil,
     arrangeGroup: (() -> Void)? = nil,
     collapse: @escaping () -> Void,
@@ -259,6 +279,7 @@ public struct PanelContent: View {
     self.newConversation = newConversation
     self.answer = answer
     self.togglePin = togglePin
+    self.toggleWindowGroup = toggleWindowGroup
     self.showGroup = showGroup
     self.minimizeGroup = minimizeGroup
     self.arrangeGroup = arrangeGroup
@@ -303,13 +324,13 @@ public struct PanelContent: View {
         if snapshot.windowGroupBusy == true {
           ProgressView().controlSize(.mini).help("Opening conversation windows…")
         }
-        if snapshot.pinnedConversationIDs?.isEmpty == false {
+        if snapshot.windowGroupConversationIDs?.isEmpty == false {
           Button {
             showGroup?()
           } label: {
             Image(systemName: "rectangle.on.rectangle")
           }
-          .buttonStyle(.plain).help("Show all pinned conversation windows")
+          .buttonStyle(.plain).help("Show all grouped conversation windows")
           .accessibilityLabel("Show conversation group")
           .contextMenu {
             Button("Show group") { showGroup?() }
@@ -321,31 +342,35 @@ public struct PanelContent: View {
           } label: {
             Image(systemName: "minus.square")
           }
-          .buttonStyle(.plain).help("Minimize all pinned conversation windows")
+          .buttonStyle(.plain).help("Minimize all grouped conversation windows")
           .accessibilityLabel("Minimize conversation group")
         }
       }.font(.system(size: 11, weight: .medium)).foregroundStyle(palette.secondary)
         .frame(height: 28).padding(.horizontal, 18)
       if nativeEffects {
         ScrollView {
-          ConversationsView(snapshot: snapshot, open: open, answer: answer, togglePin: togglePin)
-            .padding(.horizontal, 18)
-            .padding(
-              .top, 10
-            ).padding(.bottom, 17)
-            .fixedSize(horizontal: false, vertical: true)
-            .background {
-              GeometryReader { geometry in
-                Color.clear.onChange(of: geometry.size.height, initial: true) { _, height in
-                  // Wait until this layout pass finishes before resizing the NSPanel.
-                  DispatchQueue.main.async { heightChanged?(height + Self.headerHeight) }
-                }
+          ConversationsView(
+            snapshot: snapshot, open: open, answer: answer, togglePin: togglePin,
+            toggleWindowGroup: toggleWindowGroup
+          )
+          .padding(.horizontal, 18)
+          .padding(
+            .top, 10
+          ).padding(.bottom, 17)
+          .fixedSize(horizontal: false, vertical: true)
+          .background {
+            GeometryReader { geometry in
+              Color.clear.onChange(of: geometry.size.height, initial: true) { _, height in
+                // Wait until this layout pass finishes before resizing the NSPanel.
+                DispatchQueue.main.async { heightChanged?(height + Self.headerHeight) }
               }
             }
+          }
         }.scrollIndicators(.hidden)
       } else {
         ConversationsView(
-          snapshot: snapshot, staticPreview: true, open: open, answer: answer, togglePin: togglePin
+          snapshot: snapshot, staticPreview: true, open: open, answer: answer, togglePin: togglePin,
+          toggleWindowGroup: toggleWindowGroup
         )
         .padding(.horizontal, 18)
         .padding(.top, 10)
