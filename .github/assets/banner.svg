@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360" role="img" aria-labelledby="title desc">
+<title id="title">AX Widget</title>
+<desc id="desc">See what needs attention. Return to the work. Decorative illustration of the project’s workflow.</desc>
+<defs>
+  <linearGradient id="background" x2="1" y2="1"><stop stop-color="#111C27"/><stop offset="1" stop-color="#172A34"/></linearGradient>
+  <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".7" fill="#728995" opacity=".18"/></pattern>
+</defs>
+<rect width="1200" height="360" rx="16" fill="url(#background)"/>
+<rect x="768" y="25" width="406" height="310" fill="url(#grid)"/>
+<path d="M748 48V312" stroke="#354550" stroke-width="1"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="54" y="64" width="20" height="3" rx="1" fill="#AED9DA" stroke="none"/>
+<text x="86" y="70" font-size="11" fill="#BDCACD" letter-spacing="1.8">NATIVE macOS / AGENT WORKSPACE</text>
+<text x="52" y="160" font-size="64" fill="#EEF2ED" font-weight="700" letter-spacing="-2">AX Widget</text>
+<text x="55" y="211" font-size="25" fill="#CFD9DC" >See what needs attention.</text>
+<text x="55" y="245" font-size="25" fill="#CFD9DC" >Return to the work.</text>
+<text x="56" y="309" font-size="10" fill="#9DB1BA" letter-spacing="1.3">SWIFTUI + APPKIT   /   LOCAL STATE   /   NATIVE HANDOFF</text>
+<circle cx="866" cy="152" r="48" fill="none" stroke="#304352" stroke-width="5"/><circle cx="866" cy="152" r="35" fill="none" stroke="#304352" stroke-width="3"/><circle cx="1035" cy="152" r="48" fill="none" stroke="#304352" stroke-width="5"/><circle cx="1035" cy="152" r="35" fill="none" stroke="#304352" stroke-width="3"/><path d="M866 104 A48 48 0 1 1 820 165" fill="none" stroke="#AED9DA" stroke-width="5" stroke-linecap="round"/><path d="M1035 104 A48 48 0 0 1 1068 187" fill="none" stroke="#AED9DA" stroke-width="5" stroke-linecap="round"/><path d="M1035 117 A35 35 0 1 1 1007 173" fill="none" stroke="#D9C2A5" stroke-width="3"/><rect x="814" y="229" width="278" height="4" rx="2" fill="#647888" stroke="none"/><rect x="814" y="245" width="211" height="4" rx="2" fill="#304352" stroke="none"/><rect x="814" y="261" width="241" height="4" rx="2" fill="#304352" stroke="none"/><circle cx="866" cy="152" r="3" fill="#AED9DA" stroke="none" stroke-width="1"/><circle cx="1035" cy="152" r="3" fill="#AED9DA" stroke="none" stroke-width="1"/>
+</g>
+</svg>

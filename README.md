@@ -1,24 +1,21 @@
+![AX Widget — See what needs attention. Return to the work.](.github/assets/banner.svg)
+
 # AX Widget
 
 [![Quality](https://github.com/EssenceSentry/ax-widget/actions/workflows/macos.yml/badge.svg?branch=main)](https://github.com/EssenceSentry/ax-widget/actions/workflows/macos.yml)
 [![macOS](https://img.shields.io/badge/macOS-14%2B-2563eb?logo=apple&logoColor=white)](Package.swift)
 
-See which Claude or Codex conversation needs attention without opening every window. Two small rings show provider allowance. Expand the panel to read the latest update or task progress, then click the conversation to return to its native app.
+**Keep an eye on agent work without reopening every conversation.** AX Widget puts Claude and Codex allowance, recent updates, and running jobs in a small native Mac interface. Expand it to read the context, then return to the original app or attach to the running command.
 
-![Porcelain design reference showing the compact usage rings and expanded conversation panel.](docs/design/floating-porcelain.png)
+**[Watch a job reattach →](https://github.com/EssenceSentry/ax/blob/main/docs/reattach.md)** · [Build and preview](#build) · [Explore ax](https://github.com/EssenceSentry/ax)
 
-**[Watch a job reattach in Terminal](https://github.com/EssenceSentry/ax/blob/main/docs/reattach.md)**. Open the job count in the expanded panel and choose a running command. Terminal connects to that ax process and replays its output.
+- **Useful at a glance.** Compact provider rings expand into conversation updates and task progress.
+- **A route back to the actual work.** Native conversation links and Terminal reattachment connect the summary to its source.
+- **A native companion.** SwiftUI, AppKit, and a real WidgetKit extension support floating and system-widget surfaces. Background refresh reads local state without model calls.
 
-**Preview it on a Mac.** With the [build prerequisites](#build) installed, run `swift run AXWidget --demo --expanded` to explore the panel with synthetic conversations. For live usage, connect the [ax workbench](https://github.com/EssenceSentry/ax). The floating app and the [small system widget](#notification-center-and-desktop-widget) have separate build requirements.
+![Porcelain design reference for the compact and expanded AX Widget.](docs/design/floating-porcelain.png)
 
-**Carbon**, **Porcelain**, and **Frost** share the same layout. System appearance
-is the default; choose a theme from the menu-bar icon's **Appearance** submenu.
-Frost uses native Liquid Glass on macOS 26 and newer, and the standard system
-popover material on older versions. Its text colors and light/dark appearance
-follow macOS, with no custom blue background tint or simulated glass border.
-Reduce Transparency uses an opaque system background. The small system widget
-uses the native widget material. Both the floating interface and a small native Notification Center widget
-are included. There is no brand/count header and no built-in chat editor.
+With the [build prerequisites](#build) installed, run `swift run AXWidget --demo --expanded` for synthetic conversations. Carbon, Porcelain, and Frost share the same layout; system appearance is the default. The floating app and WidgetKit extension have separate build requirements.
 
 ## Floating mode
 
