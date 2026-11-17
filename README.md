@@ -1,5 +1,8 @@
 # AX Widget
 
+[![Quality](https://github.com/EssenceSentry/ax-widget/actions/workflows/macos.yml/badge.svg?branch=main)](https://github.com/EssenceSentry/ax-widget/actions/workflows/macos.yml)
+[![macOS](https://img.shields.io/badge/macOS-14%2B-2563eb?logo=apple&logoColor=white)](Package.swift)
+
 See which Claude or Codex conversation needs attention without opening every window. Two small rings show provider allowance. Expand the panel to read the latest update or task progress, then click the conversation to return to its native app.
 
 ![Porcelain design reference showing the compact usage rings and expanded conversation panel.](docs/design/floating-porcelain.png)
