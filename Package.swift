@@ -17,7 +17,8 @@ let package = Package(
         .executableTarget(name: "AXWidgetApp", dependencies: ["AXWidgetCore", "AXWidgetUI"]),
         .executableTarget(name: "AXWidgetRender", dependencies: ["AXWidgetCore", "AXWidgetUI"]),
         .testTarget(name: "AXWidgetCoreTests", dependencies: ["AXWidgetCore", "CSQLite"]),
-        .testTarget(name: "AXWidgetUITests", dependencies: ["AXWidgetUI"])
+        .testTarget(name: "AXWidgetUITests", dependencies: ["AXWidgetUI"]),
+        .testTarget(name: "AXWidgetAppTests", dependencies: ["AXWidgetApp"])
     ],
     swiftLanguageModes: [.v5]
 )

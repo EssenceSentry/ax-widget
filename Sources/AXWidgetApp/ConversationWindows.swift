@@ -4,10 +4,18 @@ import ApplicationServices
 
 /// Uses public macOS Accessibility window actions. Never changes a provider's window level.
 @MainActor final class ConversationWindows {
-  private struct Binding {
-    let pin: ConversationPin
+  private final class Binding {
+    var pin: ConversationPin
     let pid: pid_t
     let window: AXUIElement
+    var watch: GroupWindowWatch?
+    var reference: GroupWindowReference?
+
+    init(pin: ConversationPin, pid: pid_t, window: AXUIElement) {
+      self.pin = pin
+      self.pid = pid
+      self.window = window
+    }
   }
   private var bindings: [String: Binding] = [:]
   private var busy = false
@@ -16,6 +24,7 @@ import ApplicationServices
     var y: Double
     var width: Double
     var height: Double
+    var reference: GroupWindowReference?
     init(_ rect: CGRect) {
       x = rect.minX
       y = rect.minY
@@ -30,31 +39,200 @@ import ApplicationServices
   }
   private var bookmarks: [String: Bookmark] = [:]
   private let persist: Bool
-  init(persist: Bool = true) {
+  private let runningApp: (Provider) -> NSRunningApplication?
+  private var absence = WindowAbsenceConfirmation()
+  private var needsLayout = false
+  private var lastReflowMembers: [String]?
+  var onWindowClosed: (() -> Void)?
+
+  init(persist: Bool = true, runningApp: @escaping (Provider) -> NSRunningApplication? = {
+    NSRunningApplication.runningApplications(withBundleIdentifier: $0.bundleIdentifier).first
+  }) {
     self.persist = persist
+    self.runningApp = runningApp
     if persist, let data = UserDefaults.standard.data(forKey: "conversationWindowFrames") {
       bookmarks = (try? JSONDecoder().decode([String: Bookmark].self, from: data)) ?? [:]
     }
   }
   func remember() {
-    for (id, binding) in bindings {
-      if let frame = WindowAX.frame(binding.window) { bookmarks[id] = Bookmark(frame) }
+    lazy var inventory = GroupWindowInventory.read()
+    for (id, binding) in bindings where binding.watch?.destroyed != true {
+      guard let frame = WindowAX.frame(binding.window) else { continue }
+      if binding.reference == nil, let app = runningApp(binding.pin.provider),
+        app.processIdentifier == binding.pid, !app.isHidden,
+        WindowAX.value(binding.window, kAXMinimizedAttribute) as? Bool == false
+      {
+        binding.reference = inventory?.reference(for: frame, app: app)
+      }
+      var bookmark = Bookmark(frame)
+      bookmark.reference = binding.reference
+      bookmarks[id] = bookmark
     }
     if persist, let data = try? JSONEncoder().encode(bookmarks) {
       UserDefaults.standard.set(data, forKey: "conversationWindowFrames")
     }
   }
   private func existing(_ pin: ConversationPin, pid: pid_t) -> AXUIElement? {
-    let matching = WindowAX.windows(pid).filter { WindowAX.matches($0, pin: pin) }
-    if pin.provider == .claude {
-      let popouts = matching.filter { WindowAX.isClaudePopout($0, pin: pin) }
-      if popouts.count == 1 { return popouts.first }
-      let recorded = popouts.filter { bookmarks[pin.id]?.matches(WindowAX.frame($0)) == true }
-      return recorded.count == 1 ? recorded.first : nil
+    let windows = WindowAX.windows(pid)
+    if let reference = bookmarks[pin.id]?.reference, let app = runningApp(pin.provider),
+      reference.belongs(to: app)
+    {
+      guard let frame = GroupWindowInventory.read()?.entry(for: reference)?.frame else { return nil }
+      let exact = windows.filter { Bookmark(frame).matches(WindowAX.frame($0)) }
+      guard exact.count == 1 else { return nil }
+      return existing(pin, among: exact)
+    }
+    return existing(pin, among: windows)
+  }
+
+  private func existing(_ pin: ConversationPin, among windows: [AXUIElement]) -> AXUIElement? {
+    let matching = windows.filter {
+      pin.provider == .claude ? WindowAX.isClaudePopout($0, pin: pin) : WindowAX.matches($0, pin: pin)
     }
     if matching.count == 1 { return matching.first }
     let recorded = matching.filter { bookmarks[pin.id]?.matches(WindowAX.frame($0)) == true }
     return recorded.count == 1 ? recorded.first : nil
+  }
+
+  private func bind(_ binding: Binding) {
+    // A temporarily unresponsive provider must return control to the widget promptly.
+    AXUIElementSetMessagingTimeout(binding.window, 0.3)
+    if let onWindowClosed {
+      binding.watch = GroupWindowWatch(
+        window: binding.window, pid: binding.pid, didClose: onWindowClosed)
+    }
+    bindings[binding.pin.id] = binding
+  }
+
+  /// Reattach to existing windows on startup. Never open, restore or raise anything here.
+  func closedWindowIDs(in pins: [ConversationPin], now: Date = Date()) -> Set<String> {
+    guard !busy, !pins.isEmpty, AXIsProcessTrusted() else {
+      absence = WindowAbsenceConfirmation()
+      return []
+    }
+    let ids = Set(pins.map(\.id))
+    // Claude can rotate the CLI session ID while the exact Desktop window stays open.
+    for pin in pins where bindings[pin.id] == nil && pin.provider == .claude {
+      if let desktop = pin.desktopSessionID, let old = bindings.first(where: {
+        !ids.contains($0.key) && $0.value.pin.desktopSessionID == desktop
+      }) {
+        old.value.pin = pin
+        bindings[pin.id] = bindings.removeValue(forKey: old.key)
+        bookmarks[pin.id] = bookmarks.removeValue(forKey: old.key)
+      }
+    }
+    bindings = bindings.filter { ids.contains($0.key) }
+    lazy var inventory = GroupWindowInventory.read()
+    var lists: [pid_t: [AXUIElement]] = [:]
+    var missing: Set<String> = []
+    var closed: Set<String> = []
+    var attached = false
+    for pin in pins {
+      guard let app = runningApp(pin.provider), !app.isTerminated else { continue }
+      let pid = app.processIdentifier
+      if let binding = bindings[pin.id], binding.pid == pid,
+        binding.reference?.belongs(to: app) != false
+      {
+        if isClosed(binding) {
+          closed.insert(pin.id)
+        } else if let reference = binding.reference, let inventory,
+          inventory.entry(for: reference) == nil, let windows = lists[pid] ?? WindowAX.windowList(pid)
+        {
+          // Some providers retain a stale AX object without sending its destroy event.
+          lists[pid] = windows
+          if !windows.contains(where: { CFEqual($0, binding.window) }) { missing.insert(pin.id) }
+        }
+        continue
+      }
+      let bookmark = bookmarks[pin.id]
+      let reference = bookmark?.reference
+      let sameProcess = reference?.belongs(to: app) == true
+      guard let windows = lists[pid] ?? WindowAX.windowList(pid) else { continue }
+      lists[pid] = windows
+      var candidates = windows
+      if sameProcess, let reference {
+        guard let inventory else { continue }
+        // Check the recorded native number before considering any same-title copy.
+        guard let entry = inventory.entry(for: reference) else {
+          missing.insert(pin.id)
+          continue
+        }
+        guard let frame = entry.frame else { continue }
+        candidates = windows.filter { Bookmark(frame).matches(WindowAX.frame($0)) }
+        guard candidates.count == 1 else { continue }
+      }
+      if let window = existing(pin, among: candidates) {
+        let binding = Binding(pin: pin, pid: pid, window: window)
+        if sameProcess { binding.reference = reference }
+        bind(binding)
+        attached = true
+      } else if reference == nil, let bookmark, !app.isHidden, app.isFinishedLaunching,
+        let launch = GroupWindowReference.processStart(of: app), now.timeIntervalSince(launch) > 5,
+        legacyWindowIsAbsent(pin, bookmark: bookmark, windows: windows)
+      {
+        missing.insert(pin.id)
+      }
+    }
+    if attached { remember() }
+    return closed.union(absence.confirm(missing, at: now))
+  }
+
+  private func isClosed(_ binding: Binding) -> Bool {
+    guard let app = runningApp(binding.pin.provider), !app.isTerminated,
+      app.processIdentifier == binding.pid else { return false }
+    if binding.watch?.destroyed == true { return true }
+    var role: CFTypeRef?
+    return AXUIElementCopyAttributeValue(binding.window, kAXRoleAttribute as CFString, &role)
+      == .invalidUIElement
+  }
+
+  private func legacyWindowIsAbsent(
+    _ pin: ConversationPin, bookmark: Bookmark, windows: [AXUIElement]
+  ) -> Bool {
+    let title = pin.provider == .codex ? CodexWindowIdentity.title(sessionID: pin.sessionID)
+      : pin.desktopSessionID.flatMap { ClaudeWindowIdentity.title(desktopSessionID: $0) }
+    guard let title else { return false }
+    return windows.allSatisfy { window in
+      guard let name = WindowAX.value(window, kAXTitleAttribute) as? String, !name.isEmpty,
+        WindowAX.value(window, kAXMinimizedAttribute) as? Bool == false else { return false }
+      if name == title {
+        // A Claude main window can display the same chat after its dedicated pop-out is closed.
+        return pin.provider == .claude && pin.desktopSessionID.map {
+          WindowAX.isClaudeMain(window, session: $0)
+        } == true
+      }
+      return !bookmark.matches(WindowAX.frame(window))
+    }
+  }
+
+  /// Reflow surviving native windows on their display, without navigating or changing focus.
+  func arrangeAfterClose(_ pins: [ConversationPin]) async throws {
+    guard !busy, !pins.isEmpty, AXIsProcessTrusted(), let primary = NSScreen.screens.first else { return }
+    let windows = visibleBindings(pins)
+    lastReflowMembers = windows.map { $0.pin.id }
+    guard let first = windows.first, let frame = WindowAX.frame(first.window) else { return }
+    let visible = try ConversationWindowLayout.maximizedFrame(for: frame, visibleFrames: NSScreen.screens.map {
+      ConversationWindowLayout.accessibilityRect($0.visibleFrame, primaryTop: primary.frame.maxY)
+    })
+    busy = true
+    defer { busy = false }
+    try await tile(windows, visible: visible, padding: windows.count == 1 ? 0 : 6)
+    needsLayout = windows.count != pins.count
+    remember()
+  }
+
+  func hasDeferredReflow(_ pins: [ConversationPin]) -> Bool {
+    guard needsLayout, AXIsProcessTrusted() else { return false }
+    let ready = visibleBindings(pins).map { $0.pin.id }
+    return !ready.isEmpty && ready != lastReflowMembers
+  }
+
+  private func visibleBindings(_ pins: [ConversationPin]) -> [Binding] {
+    pins.compactMap { bindings[$0.id] }.filter {
+      runningApp($0.pin.provider)?.isHidden == false && valid($0)
+        && WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool == false
+        && WindowAX.value($0.window, "AXFullScreen") as? Bool != true
+    }
   }
 
   /// Explicit developer acceptance check; never runs during background refresh.
@@ -173,11 +351,10 @@ import ApplicationServices
   func maximizeIfPresent(_ pin: ConversationPin) async throws {
     guard !busy else { return }
     guard AXIsProcessTrusted() else { throw WindowGroupError.accessibility }
+    if let registered = bindings[pin.id], isClosed(registered) { return }
     var binding = bindings[pin.id].flatMap { valid($0) ? $0 : nil }
     if binding == nil,
-      let app = NSRunningApplication.runningApplications(
-        withBundleIdentifier: pin.provider.bundleIdentifier
-      ).first
+      let app = runningApp(pin.provider)
     {
       if let window = existing(pin, pid: app.processIdentifier) {
         binding = Binding(pin: pin, pid: app.processIdentifier, window: window)
@@ -212,7 +389,7 @@ import ApplicationServices
         try WindowAX.setFrame(binding.window, target)
         try await Task.sleep(nanoseconds: 100_000_000)
         if Bookmark(target).matches(WindowAX.frame(binding.window)) {
-          bindings[pin.id] = binding
+          if bindings[pin.id] !== binding { bind(binding) }
           remember()
           return
         }
@@ -228,9 +405,16 @@ import ApplicationServices
     }
   }
 
-  func forget(_ id: String) {
-    bindings.removeValue(forKey: id)
-    bookmarks.removeValue(forKey: id)
+  func forget(_ id: String) { forget([id]) }
+
+  func forget(_ ids: Set<String>, arrangeRemaining: Bool = false) {
+    needsLayout = arrangeRemaining
+    lastReflowMembers = nil
+    for id in ids {
+      bindings.removeValue(forKey: id)
+      bookmarks.removeValue(forKey: id)
+      absence.forget(id)
+    }
     remember()
   }
 
@@ -244,12 +428,16 @@ import ApplicationServices
     var windows: [Binding] = []
     var opened = false
     for pin in pins {
+      if absence.isPending(pin.id) || bindings[pin.id].map(isClosed) == true {
+        onWindowClosed?()
+        throw WindowGroupError.unavailable("A grouped window is closing.")
+      }
       if let binding = bindings[pin.id], valid(binding) {
         windows.append(binding)
       } else {
         bindings.removeValue(forKey: pin.id)
         let (binding, created) = try await locateOrOpen(pin)
-        bindings[pin.id] = binding
+        bind(binding)
         windows.append(binding)
         opened = opened || created
       }
@@ -263,11 +451,15 @@ import ApplicationServices
         kAXFrontmostAttribute as CFString, kCFBooleanTrue)
     }
     for binding in windows { try raise(binding) }
-    if arrange || opened {
+    if arrange || opened || needsLayout {
       for binding in windows {
         await WindowAX.hideSidebar(binding.window, pid: binding.pid, provider: binding.pin.provider)
       }
-      try await tile(windows, screen: screen ?? NSScreen.main)
+      guard let target = screen ?? NSScreen.main, let primary = NSScreen.screens.first
+      else { throw WindowGroupError.cannotFit }
+      try await tile(windows, visible: ConversationWindowLayout.accessibilityRect(
+        target.visibleFrame, primaryTop: primary.frame.maxY), padding: needsLayout && windows.count == 1 ? 0 : 6)
+      needsLayout = false
       for binding in windows { try raise(binding) }
     }
     remember()
@@ -278,12 +470,10 @@ import ApplicationServices
     guard AXIsProcessTrusted() else { throw WindowGroupError.accessibility }
     let windows = try pins.map { pin -> Binding in
       if bindings[pin.id] == nil,
-        let app = NSRunningApplication.runningApplications(
-          withBundleIdentifier: pin.provider.bundleIdentifier
-        ).first
+        let app = runningApp(pin.provider)
       {
         if let window = existing(pin, pid: app.processIdentifier) {
-          bindings[pin.id] = Binding(pin: pin, pid: app.processIdentifier, window: window)
+          bind(Binding(pin: pin, pid: app.processIdentifier, window: window))
         }
       }
       guard let binding = bindings[pin.id], valid(binding) else { throw WindowGroupError.changed }
@@ -307,8 +497,8 @@ import ApplicationServices
   }
 
   private func valid(_ binding: Binding) -> Bool {
-    guard let app = NSRunningApplication(processIdentifier: binding.pid), !app.isTerminated,
-      app.bundleIdentifier == binding.pin.provider.bundleIdentifier
+    guard binding.watch?.destroyed != true, let app = runningApp(binding.pin.provider),
+      !app.isTerminated, app.processIdentifier == binding.pid
     else { return false }
     return WindowAX.matches(binding.window, pin: binding.pin)
   }
@@ -331,10 +521,7 @@ import ApplicationServices
     AXUIElementSetAttributeValue(binding.window, kAXMainAttribute as CFString, kCFBooleanTrue)
   }
 
-  private func tile(_ windows: [Binding], screen: NSScreen?) async throws {
-    guard let screen, let primary = NSScreen.screens.first else { throw WindowGroupError.cannotFit }
-    let visible = ConversationWindowLayout.accessibilityRect(
-      screen.visibleFrame, primaryTop: primary.frame.maxY)
+  private func tile(_ windows: [Binding], visible: CGRect, padding: CGFloat) async throws {
     let originals = try windows.map { binding -> CGRect in
       guard let frame = WindowAX.frame(binding.window) else { throw WindowGroupError.cannotFit }
       return frame
@@ -343,7 +530,7 @@ import ApplicationServices
     do {
       for _ in 0...windows.count {
         let frames = try ConversationWindowLayout.frames(
-          minimumWidths: minimums, visible: visible, gap: 6, padding: 6)
+          minimumWidths: minimums, visible: visible, gap: 6, padding: padding)
         for (binding, frame) in zip(windows, frames) {
           try WindowAX.setFrame(binding.window, frame)
         }
@@ -389,9 +576,7 @@ import ApplicationServices
         "Codex cannot identify this chat by a unique title. Give it a distinct title before pinning it."
       )
     }
-    if let running = NSRunningApplication.runningApplications(
-      withBundleIdentifier: pin.provider.bundleIdentifier
-    ).first {
+    if let running = runningApp(pin.provider) {
       if let window = existing(pin, pid: running.processIdentifier) {
         return (Binding(pin: pin, pid: running.processIdentifier, window: window), false)
       }
@@ -602,13 +787,15 @@ enum WindowAX {
     }
     return result
   }
-  static func windows(_ pid: pid_t) -> [AXUIElement] {
+  static func windows(_ pid: pid_t) -> [AXUIElement] { windowList(pid) ?? [] }
+
+  static func windowList(_ pid: pid_t) -> [AXUIElement]? {
     let app = AXUIElementCreateApplication(pid)
     AXUIElementSetMessagingTimeout(app, 0.3)
     // Electron documents this opt-in for native assistive clients. It exposes
     // the renderer tree without enabling VoiceOver or changing system settings.
     AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-    return value(app, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    return value(app, kAXWindowsAttribute) as? [AXUIElement]
   }
   static func nodes(
     _ element: AXUIElement, maxDepth: Int = 56, limit: Int = 6000,
@@ -647,7 +834,10 @@ enum WindowAX {
       return name(window) == title
     }
     guard let session = pin.desktopSessionID else { return false }
-    if isClaudePopout(window, pin: pin) { return true }
+    return isClaudePopout(window, pin: pin) || isClaudeMain(window, session: session)
+  }
+
+  static func isClaudeMain(_ window: AXUIElement, session: String) -> Bool {
     var pending: [(AXUIElement, Int)] = [(window, 0)]
     var cursor = 0
     let deadline = Date().addingTimeInterval(1)

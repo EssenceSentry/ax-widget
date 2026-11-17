@@ -11,9 +11,22 @@ import Foundation
   private var pendingURLs: [URL] = []
   private var answering = false
   private var statusSubscription: AnyCancellable?
-  private let conversationWindows = ConversationWindows()
+  private let conversationWindows: ConversationWindows
+
+  override convenience init() { self.init(conversationWindows: ConversationWindows()) }
+
+  init(conversationWindows: ConversationWindows) {
+    self.conversationWindows = conversationWindows
+    super.init()
+  }
+
+  private var groupPoll: AnyCancellable?
+  private var scheduledWindowCheck: Task<Void, Never>?
   private var groupOperation = false {
-    didSet { store.setGroupBusy(groupOperation) }
+    didSet {
+      store.setGroupBusy(groupOperation)
+      if !groupOperation { scheduleWindowCheck() }
+    }
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -52,6 +65,13 @@ import Foundation
         pending
         ? "Question waiting · Click to answer · Right-click for options"
         : "Click to toggle conversations · Right-click for options"
+    }
+    if !store.demo {
+      conversationWindows.onWindowClosed = { [weak self] in self?.scheduleWindowCheck() }
+      // Recover observers after a widget/provider restart or a missed native event.
+      groupPoll = Timer.publish(every: 4, tolerance: 0.4, on: .main, in: .common).autoconnect()
+        .sink { [weak self] _ in self?.checkWindowGroup() }
+      scheduleWindowCheck()
     }
     store.start()
     if CommandLine.arguments.contains("--expanded") { floating.expand() }
@@ -179,8 +199,50 @@ import Foundation
     toggleWindowGroup(pin.conversation)
   }
 
+  private func scheduleWindowCheck() {
+    guard !store.demo, !store.group.pins.isEmpty, scheduledWindowCheck == nil else { return }
+    scheduledWindowCheck = Task { @MainActor [weak self] in
+      // Let several native closes (or a provider quit) settle before changing the group.
+      try? await Task.sleep(nanoseconds: 200_000_000)
+      guard let self else { return }
+      scheduledWindowCheck = nil
+      checkWindowGroup()
+    }
+  }
+
+  @discardableResult private func pruneClosedWindows() -> Set<String> {
+    let ids = conversationWindows.closedWindowIDs(in: store.group.pins)
+    guard !ids.isEmpty else { return [] }
+    let remaining = ConversationGroup(pins: store.group.pins.filter { !ids.contains($0.id) })
+    conversationWindows.forget(ids, arrangeRemaining: !remaining.pins.isEmpty)
+    store.setGroup(remaining)
+    store.reportGroupError(nil)
+    return ids
+  }
+
+  private func checkWindowGroup() {
+    guard !groupOperation, !store.group.pins.isEmpty else { return }
+    if !pruneClosedWindows().isEmpty || conversationWindows.hasDeferredReflow(store.group.pins) {
+      reflowOpenWindows()
+    }
+  }
+
+  private func reflowOpenWindows() {
+    guard !store.group.pins.isEmpty else { return }
+    groupOperation = true
+    Task {
+      defer { groupOperation = false }
+      do { try await conversationWindows.arrangeAfterClose(store.group.pins) }
+      catch { store.reportGroupError(error) }
+    }
+  }
+
   private func toggleWindowGroup(_ conversation: Conversation) {
     guard !store.demo, !groupOperation else { return }
+    if pruneClosedWindows().contains(conversation.id) {
+      reflowOpenWindows()
+      return
+    }
     var group = store.group
     if let removed = group.pins.first(where: { $0.id == conversation.id }) {
       group.remove(conversation.id)
@@ -231,6 +293,8 @@ import Foundation
 
   private func showConversationGroup(arrange: Bool = false) {
     guard !store.demo, !groupOperation else { return }
+    pruneClosedWindows()
+    guard !store.group.pins.isEmpty else { return }
     groupOperation = true
     Task {
       defer { groupOperation = false }
@@ -250,6 +314,7 @@ import Foundation
 
   private func minimizeConversationGroup() {
     guard !store.demo, !groupOperation else { return }
+    pruneClosedWindows()
     floating.collapse()
     do {
       try conversationWindows.minimize(store.group.pins)

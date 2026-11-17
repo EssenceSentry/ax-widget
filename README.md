@@ -106,6 +106,10 @@ sidebar collapsed (its slim navigation rail remains). The separate toolbar pin s
   Membership changes arrange the group again. If the apps' minimum window sizes do not
   fit, the previous frames are restored and the panel explains the problem.
   Layout adapts to different native minimum widths instead of assuming equal minima.
+- Close a grouped window in Claude or Codex to take it out of the split. Two
+  remaining windows share their display side by side. A single remaining window
+  fills the usable desktop. Minimizing a window keeps it in the group. The
+  pushpin that saves the conversation in the widget works independently.
 - Removing a window from the group maximizes it on its current display, then
   rearranges and raises the remaining group in front of it. Maximizing fills the
   usable desktop area, respecting the Dock and menu bar, without entering a
