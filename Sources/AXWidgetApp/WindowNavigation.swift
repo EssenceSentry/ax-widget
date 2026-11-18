@@ -1,6 +1,7 @@
 import AXWidgetCore
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 
 extension WindowAX {
   static func isStandardWindow(_ window: AXUIElement) -> Bool {
@@ -130,10 +131,24 @@ extension WindowAX {
         value(node, kAXRoleAttribute) as? String == "AXButton"
           && ["search", "search chats", "switch chat"].contains(name(node).lowercased())
       }
-    guard let searchButton,
-      AXUIElementPerformAction(searchButton, kAXPressAction as CFString) == .success
-    else {
-      throw WindowGroupError.unavailable("Codex chat search is unavailable in the separate window.")
+    if searchButton.map({ AXUIElementPerformAction($0, kAXPressAction as CFString) }) != .success {
+      // Codex can hide its Search Chats menu item and collapse the sidebar.
+      // Its native Command-K shortcut opens the picker. All subsequent actions
+      // address controls inside the verified destination window.
+      try await focus(window, pid: pid)
+      guard CGPreflightPostEventAccess(),
+        let down = CGEvent(
+          keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_K), keyDown: true),
+        let up = CGEvent(
+          keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_K), keyDown: false)
+      else {
+        throw WindowGroupError.unavailable(
+          "Codex chat search is unavailable in the separate window.")
+      }
+      down.flags = .maskCommand
+      up.flags = .maskCommand
+      down.postToPid(pid)
+      up.postToPid(pid)
     }
     var typed = false
     let deadline = Date().addingTimeInterval(8)
