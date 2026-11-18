@@ -213,11 +213,12 @@ these are not evidence of system-widget hosting.
 
 ## Local data
 
-The app reads ax's conversation catalog and queries running tasks through its
-local daemon socket, supplements titles
-and registration from the native local clients, and reads a bounded recent tail
-of relevant transcripts for prose. Question cursors start at the latest Codex
-turn, discard prompts from earlier or interrupted turns, and retain pending
+The app lists active, registered Codex chats from the native thread database.
+It selects interactive CLI, Desktop and VS Code chats before applying the display
+limit. Headless runs and delegated workers stay out of the list. Claude chats
+come from the ax catalog and Claude Desktop registrations. The app queries ax
+tasks through its local socket and reads recent transcript tails for prose.
+Question cursors start at the latest Codex turn, discard prompts from earlier or interrupted turns, and retain pending
 questions through lengthy tool output within that turn. Existing conversation
 files are watched for changes, coalesced over 200 milliseconds, with a four-second
 discovery/fallback poll. Usage comes from `ax usage` once per minute, without

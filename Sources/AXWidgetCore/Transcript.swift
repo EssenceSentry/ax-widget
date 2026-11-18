@@ -13,7 +13,12 @@ public enum TranscriptReader {
   public static func isMainConversation(_ url: URL, registeredDesktop: Bool = false) -> Bool {
     guard let handle = try? FileHandle(forReadingFrom: url) else { return true }
     defer { try? handle.close() }
-    let data = (try? handle.read(upToCount: 32_768)) ?? Data()
+    var data = (try? handle.read(upToCount: 32_768)) ?? Data()
+    // A Codex metadata line can include a long instruction block before the source fields.
+    while data.count >= 32_768 && !data.contains(10) && data.count < 1_048_576 {
+      guard let more = try? handle.read(upToCount: 32_768), !more.isEmpty else { break }
+      data.append(more)
+    }
     for line in String(decoding: data, as: UTF8.self).split(separator: "\n").prefix(8) {
       guard let data = String(line).data(using: .utf8),
         let row = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -28,11 +33,12 @@ public enum TranscriptReader {
       }
       guard row["type"] as? String == "session_meta", let payload = row["payload"] as? [String: Any]
       else { continue }
-      if payload["thread_source"] as? String == "guardian_review" { return false }
-      if let source = payload["source"] as? [String: Any], source["subagent"] != nil {
+      if let kind = payload["thread_source"] as? String, ["guardian_review", "subagent"].contains(kind) {
         return false
       }
-      if let source = payload["source"] as? String, source.contains("guardian") { return false }
+      if let source = payload["source"] {
+        return (source as? String).map(CodexHistory.interactiveSources.contains) ?? false
+      }
       return true
     }
     return true

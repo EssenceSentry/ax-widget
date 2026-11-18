@@ -30,14 +30,15 @@ public struct LocalRepository {
     let aliases = ClaudeSessionAliases(records: records, paths: paths)
     let saved = WidgetConversationPins(pins: pins.map(aliases.resolve))
     let pinnedIDs = Set(saved.pins.map(\.id))
-    for pin in saved.pins { found[pin.id] = pin.conversation }
+    for pin in saved.pins where pin.provider == .claude { found[pin.id] = pin.conversation }
     var issues: [String] = []
     var excluded: Set<String> = []
+    var codexHasSource = false
     let catalog = paths.axData.appendingPathComponent("catalog.sqlite3")
     if FileManager.default.fileExists(atPath: catalog.path) {
       do {
         let db = try ReadOnlyDatabase(url: catalog)
-        for row in try db.rows("SELECT * FROM conversations ORDER BY mtime DESC LIMIT 40") {
+        for row in try db.rows("SELECT * FROM conversations WHERE provider='claude' ORDER BY mtime DESC LIMIT 40") {
           guard let provider = Provider(rawValue: row["provider"] ?? ""), let id = row["id"],
             UUID(uuidString: id) != nil
           else { continue }
@@ -50,43 +51,14 @@ public struct LocalRepository {
       } catch { issues.append("ax conversation index: \(error.localizedDescription)") }
     }
     do {
-      let dbFiles = try FileManager.default.contentsOfDirectory(
-        at: paths.codexHome, includingPropertiesForKeys: nil
-      )
-      .filter { $0.lastPathComponent.hasPrefix("state_") && $0.pathExtension == "sqlite" }
-      .sorted {
-        $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending
-      }
-      if let file = dbFiles.first {
-        let db = try ReadOnlyDatabase(url: file)
-        let columns = Set(try db.rows("PRAGMA table_info(threads)").compactMap { $0["name"] })
-        let originColumns = ["source", "originator"].filter { columns.contains($0) }
-        let extras = originColumns.isEmpty ? "" : "," + originColumns.joined(separator: ",")
-        for archived in try db.rows("SELECT id FROM threads WHERE archived=1") {
-          if let id = archived["id"] { excluded.insert("codex:" + id) }
-        }
-        let selectedPins = saved.pins.filter { $0.provider == .codex }.map(\.sessionID)
-        let pinnedRows =
-          selectedPins.isEmpty
-          ? []
-          : try db.rows(
-            "SELECT id,title,cwd,rollout_path,updated_at,archived" + extras
-              + " FROM threads WHERE id IN (" + selectedPins.map { _ in "?" }.joined(separator: ",")
-              + ")",
-            strings: selectedPins)
-        for row in try db.rows(
-          "SELECT id,title,cwd,rollout_path,updated_at,archived" + extras
-            + " FROM threads ORDER BY updated_at DESC LIMIT 60") + pinnedRows
-        {
+      if let history = try CodexHistory(home: paths.codexHome) {
+        codexHasSource = history.hasSource
+        let pins = saved.pins.filter { $0.provider == .codex }.map(\.sessionID)
+        for row in try history.recent(pins: pins) {
           guard let id = row["id"], UUID(uuidString: id) != nil else { continue }
-          let key = "codex:\(id)"
-          let origin = originColumns.compactMap { row[$0] }.joined(separator: " ").lowercased()
-          if row["archived"] == "1" || origin.contains("guardian") || origin.contains("subagent") {
-            excluded.insert(key)
-            continue
-          }
+          let key = "codex:" + id
           found[key] = Conversation(
-            provider: .codex, sessionID: id, title: row["title"] ?? "Codex conversation",
+            provider: .codex, sessionID: id, title: history.names[id] ?? row["title"] ?? "Codex conversation",
             project: row["cwd"] ?? "", source: row["rollout_path"],
             updated: parseDate(row["updated_at"]) ?? .distantPast)
         }
@@ -146,17 +118,6 @@ public struct LocalRepository {
       }
     } catch { issues.append("ax tasks: \(error.localizedDescription)") }
 
-    let titlesURL = paths.codexHome.appendingPathComponent("session_index.jsonl")
-    if let data = try? Data(contentsOf: titlesURL), data.count < 4_194_304 {
-      for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
-        if let data = String(line).data(using: .utf8),
-          let row = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-          let id = row["id"] as? String, let title = row["thread_name"] as? String
-        {
-          found["codex:" + id]?.title = title
-        }
-      }
-    }
     // Filter SDK workers before limiting candidates: many recent worker sessions
     // must not crowd older, real conversations out of the widget.
     let candidates = found.values.filter { item in
@@ -169,6 +130,7 @@ public struct LocalRepository {
         item.updated >= cutoff || pinnedIDs.contains(item.id)
           || modified.map({ $0 >= cutoff }) == true
       else { return false }
+      if item.provider == .codex && codexHasSource { return true }
       return item.source.map {
         TranscriptReader.isMainConversation(
           URL(fileURLWithPath: $0), registeredDesktop: item.desktopSessionID != nil)
