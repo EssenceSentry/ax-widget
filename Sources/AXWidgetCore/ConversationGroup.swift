@@ -43,6 +43,13 @@ public struct ConversationGroup: Codable, Equatable, Sendable {
     pins.append(ConversationPin(conversation))
   }
   public mutating func remove(_ id: String) { pins.removeAll { $0.id == id } }
+  public func contains(_ chat: Conversation) -> Bool {
+    pins.contains { pin in
+      pin.id == chat.id
+        || (pin.provider == .claude && chat.provider == .claude
+          && pin.desktopSessionID != nil && pin.desktopSessionID == chat.desktopSessionID)
+    }
+  }
   public func ordered(_ conversations: [Conversation], limit: Int) -> [Conversation] {
     let ids = Set(pins.map(\.id))
     let pinned = pins.compactMap { pin in conversations.first { $0.id == pin.id } }
@@ -55,9 +62,11 @@ public struct ConversationGroup: Codable, Equatable, Sendable {
 public enum WindowGroupError: LocalizedError {
   case full, unregistered, accessibility
   case unavailable(String)
-  case ambiguous, cannotFit, changed
+  case ambiguous, cannotFit, changed, claudeRowUnavailable
   public var errorDescription: String? {
     switch self {
+    case .claudeRowUnavailable:
+      return "Claude's conversation row is unavailable. Open its sidebar and try again."
     case .full: return "Group up to three conversation windows. Remove one before adding another."
     case .unregistered: return "This conversation has no Desktop registration yet."
     case .accessibility:

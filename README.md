@@ -64,7 +64,9 @@ With the [build prerequisites](#build) installed, run `swift run AXWidget --demo
   previous/next arrows and a position counter. Choices and typed drafts are kept
   while navigating. A text field is included where allowed. **Send answer**
   submits the selected response to that same
-  conversation; its pending indicator clears when the native transcript records it.
+  conversation. Once delivery succeeds, the answered questions disappear immediately.
+  The next pending question stays available, and the indicator clears after the last answer.
+  A failed send keeps the draft. An unconfirmed send asks you to check the conversation.
   When an agent asks several questions together, fill them in and use **Send answers**.
   Clicking the text field clears the selected choices. The send button appears
   only once the required answers have a selection or nonempty text.
@@ -132,6 +134,12 @@ title and return-to-main-window control. Codex also exposes a native title. AX W
 checks titles against the corresponding provider's local registration/history and
 accepts only unique matches; duplicate titles must be renamed before pinning.
 Use ordinary desktop windows on one display; leave full screen before arranging.
+
+The arrow beside a grouped chat raises the whole split and preserves its layout.
+The arrow beside another chat opens that conversation outside the split. Adding a
+chat to the split reuses its existing Codex window or moves it into a compact
+Claude pop-out. AX Widget closes a verified duplicate regular view after the split
+is ready. If the app cannot safely close that view, the panel tells you.
 
 ## Notification Center and desktop widget
 

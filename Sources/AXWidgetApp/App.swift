@@ -277,9 +277,10 @@ import Foundation
           do {
             try await conversationWindows.show(
               group.pins, screen: floating.groupScreen,
-              arrange: true)
+              arrange: true, joining: ConversationPin(conversation))
             store.setGroup(group)
-            store.reportGroupError(nil)
+            store.reportGroupError(conversationWindows.duplicateCloseIssue)
+            if conversationWindows.duplicateCloseIssue != nil { floating.expand() }
           } catch {
             conversationWindows.forget(conversation.id)
             store.reportGroupError(error)
@@ -291,7 +292,7 @@ import Foundation
     }
   }
 
-  private func showConversationGroup(arrange: Bool = false) {
+  private func showConversationGroup(arrange: Bool = false, raiseOnly: Bool = false) {
     guard !store.demo, !groupOperation else { return }
     pruneClosedWindows()
     guard !store.group.pins.isEmpty else { return }
@@ -300,9 +301,12 @@ import Foundation
       defer { groupOperation = false }
       floating.collapse()
       do {
-        try await conversationWindows.show(
-          store.group.pins, screen: floating.groupScreen,
-          arrange: arrange)
+        if raiseOnly {
+          try await conversationWindows.raiseExistingGroup(store.group.pins)
+        } else {
+          try await conversationWindows.show(
+            store.group.pins, screen: floating.groupScreen, arrange: arrange)
+        }
         store.reportGroupError(nil)
       } catch {
         store.reportGroupError(error)
@@ -345,7 +349,11 @@ import Foundation
   private func answer(
     _ conversation: Conversation, group: AgentQuestionGroup, answers: [String: [String]]
   ) async -> String? {
-    guard !store.demo, !answering, let source = conversation.source,
+    guard !groupOperation else {
+      return "The windows are being arranged. Try sending again in a moment."
+    }
+    guard !store.demo, !answering, !store.hasSent(group, in: conversation),
+      let source = conversation.source,
       let fresh = try? TranscriptReader.read(URL(fileURLWithPath: source)),
       fresh.questions.contains(group), let url = conversation.deepLink
     else {
@@ -366,18 +374,19 @@ import Foundation
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = false
     do {
-      let running: NSRunningApplication = try await withCheckedThrowingContinuation {
-        continuation in
-        NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration) {
-          running, error in
-          if let error {
-            continuation.resume(throwing: error)
-          } else if let running {
-            continuation.resume(returning: running)
-          } else {
-            continuation.resume(throwing: AxClient.ClientError.unavailable)
-          }
-        }
+      let running: NSRunningApplication
+      // Codex replies already address the original session over its live
+      // connection. Opening its URL here could navigate a different split pane.
+      if let active = NSRunningApplication.runningApplications(
+        withBundleIdentifier: conversation.provider.bundleIdentifier
+      ).first,
+        (conversation.provider == .codex && store.group.pins.contains { $0.provider == .codex })
+          || store.group.contains(conversation)
+      {
+        running = active
+      } else {
+        running = try await NSWorkspace.shared.open(
+          [url], withApplicationAt: app, configuration: configuration)
       }
       let pid = running.processIdentifier
       try await Task.detached(priority: .userInitiated) {
@@ -388,12 +397,18 @@ import Foundation
           try ClaudeQuestionClient.reply(pid: pid, group: group, answers: answers)
         }
       }.value
+      store.didSend(group, in: conversation)
       return nil
     } catch { return error.localizedDescription }
   }
 
   private func open(_ conversation: Conversation) {
-    guard !store.demo else { return }
+    guard !store.demo, !groupOperation else { return }
+    pruneClosedWindows()
+    if store.group.contains(conversation) {
+      showConversationGroup(raiseOnly: true)
+      return
+    }
     guard let url = conversation.deepLink else {
       let alert = NSAlert()
       alert.messageText = "Conversation unavailable in Desktop"
@@ -402,7 +417,21 @@ import Foundation
       alert.runModal()
       return
     }
-    open(url, provider: conversation.provider)
+    let pins = store.group.pins.filter { $0.provider == conversation.provider }
+    guard !pins.isEmpty else { open(url, provider: conversation.provider); return }
+    groupOperation = true
+    floating.collapse()
+    Task {
+      defer { groupOperation = false }
+      do {
+        try await conversationWindows.openOutsideGroup(
+          ConversationPin(conversation), protecting: pins)
+        store.reportGroupError(nil)
+      } catch {
+        store.reportGroupError(error)
+        floating.expand()
+      }
+    }
   }
 
   private func startConversation(_ provider: Provider) {

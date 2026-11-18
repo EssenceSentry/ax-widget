@@ -25,6 +25,28 @@ import WidgetKit
   private var sessionAliases = ClaudeSessionAliases()
   private var groupIssue: String?
   private var groupBusy = false
+  private var sentQuestions = SentQuestions()
+  private var receiptRevision = 0
+
+  func hasSent(_ group: AgentQuestionGroup, in chat: Conversation) -> Bool {
+    sentQuestions.contains(group.id, in: chat)
+  }
+
+  func didSend(_ group: AgentQuestionGroup, in chat: Conversation) {
+    receiptRevision += 1
+    sentQuestions.record(group.id, in: chat)
+    saveReceipts()
+    sentQuestions.apply(to: &snapshot.conversations)
+    persist(reload: true)
+    refresh()
+  }
+
+  private func saveReceipts() {
+    if let data = try? JSONEncoder().encode(sentQuestions) {
+      UserDefaults.standard.set(data, forKey: "sentQuestionReceipts")
+    }
+  }
+
   func setGroupBusy(_ busy: Bool) {
     groupBusy = busy
     snapshot.windowGroupBusy = busy
@@ -88,6 +110,12 @@ import WidgetKit
       UserDefaults.standard.set(data, forKey: "widgetConversationPins")
     }
     snapshot = demo ? .demo() : SnapshotStore.read()
+    if !demo, let data = UserDefaults.standard.data(forKey: "sentQuestionReceipts"),
+      let saved = try? JSONDecoder().decode(SentQuestions.self, from: data)
+    {
+      sentQuestions = saved
+      sentQuestions.apply(to: &snapshot.conversations)
+    }
     snapshot.pinnedConversationIDs = widgetPins.pins.map(\.id)
     snapshot.windowGroupConversationIDs = group.pins.map(\.id)
     snapshot.appearance =
@@ -138,6 +166,7 @@ import WidgetKit
     }
     refreshing = true
     let pins = widgetPins.pins
+    let revision = receiptRevision
     queue.async { [weak self] in
       let (conversations, issues, aliases) = LocalRepository().conversations(limit: 8, pins: pins)
       Task { @MainActor in
@@ -169,6 +198,12 @@ import WidgetKit
           allowances: self.usage, conversations: conversations,
           issues: [self.groupIssue].compactMap { $0 } + issues
             + [self.usageIssue].compactMap { $0 }, appearance: self.appearance)
+        if self.receiptRevision == revision {
+          let before = self.sentQuestions
+          self.sentQuestions.reconcile(with: conversations)
+          if before != self.sentQuestions { self.saveReceipts() }
+        }
+        self.sentQuestions.apply(to: &result.conversations)
         result.pinnedConversationIDs = self.widgetPins.pins.map(\.id)
         result.windowGroupConversationIDs = self.group.pins.map(\.id)
         result.windowGroupBusy = self.groupBusy

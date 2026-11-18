@@ -234,13 +234,22 @@ public struct ConversationsView: View {
 
   @ViewBuilder private func title(_ conversation: Conversation, palette: Palette) -> some View {
     if let open {
+      let grouped = snapshot.windowGroupConversationIDs?.contains(conversation.id) == true
       Button {
         open(conversation)
       } label: {
         titleLabel(conversation, palette: palette)
       }
-      .buttonStyle(.plain).help("Open this conversation in \(conversation.provider.label)")
-      .accessibilityLabel("Open \(conversation.title) in \(conversation.provider.label)")
+      .buttonStyle(.plain).disabled(snapshot.windowGroupBusy == true)
+      .help(
+        grouped
+          ? "Raise all side-by-side windows"
+          : "Open this conversation in \(conversation.provider.label)"
+      )
+      .accessibilityLabel(
+        grouped
+          ? "Raise the window group for \(conversation.title)"
+          : "Open \(conversation.title) in \(conversation.provider.label)")
     } else if let url = conversation.widgetLink, !snapshot.isDemo {
       Link(destination: url) { titleLabel(conversation, palette: palette) }.buttonStyle(.plain)
     } else {

@@ -10,7 +10,7 @@ private final class QuestionDraft: ObservableObject {
   @Published var words: [String: String] = [:]
   @Published var currentID: String?
   @Published var sending = false
-  @Published var submitted: Set<String> = []
+  @Published var uncertain: Set<String> = []
   @Published var errors: [String: String] = [:]
 }
 
@@ -46,16 +46,17 @@ struct QuestionForm: View {
             draft.currentID = targets[currentIndex - 1].id
           } label: {
             Image(systemName: "chevron.left")
-          }.disabled(currentIndex == 0).accessibilityLabel("Previous question")
+          }.disabled(currentIndex == 0 || draft.sending).accessibilityLabel("Previous question")
           Text("\(currentIndex + 1) of \(targets.count)")
             .font(.system(size: 10)).monospacedDigit().foregroundStyle(palette.secondary)
           Button {
             draft.currentID = targets[currentIndex + 1].id
           } label: {
             Image(systemName: "chevron.right")
-          }.disabled(currentIndex == targets.count - 1).accessibilityLabel("Next question")
+          }.disabled(currentIndex == targets.count - 1 || draft.sending).accessibilityLabel(
+            "Next question")
         }.buttonStyle(.plain)
-        question(target).disabled(draft.sending || draft.submitted.contains(target.group.id))
+        question(target).disabled(draft.sending || draft.uncertain.contains(target.group.id))
         if let error = draft.errors[target.group.id] {
           Text(error).font(.system(size: 10)).foregroundStyle(palette.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -73,21 +74,18 @@ struct QuestionForm: View {
             Text("Send answer").font(.system(size: 11, weight: .medium))
               .foregroundStyle(palette.secondary).padding(.horizontal, 10).padding(.vertical, 5)
               .background(palette.track, in: RoundedRectangle(cornerRadius: 5))
-          } else if !preview
-            && (ready || draft.sending || draft.submitted.contains(target.group.id))
+          } else if !preview && !draft.uncertain.contains(target.group.id)
+            && (ready || draft.sending)
           {
             Button(
               draft.sending
                 ? "Sending…"
-                : (draft.submitted.contains(target.group.id)
-                  ? "Sent · waiting for agent"
-                  : (target.group.questions.count > 1 ? "Send answers" : "Send answer"))
+                : (target.group.questions.count > 1 ? "Send answers" : "Send answer")
             ) {
               submit(target.group)
             }.buttonStyle(.borderedProminent).controlSize(.small)
               .disabled(
-                answer == nil || draft.sending || draft.submitted.contains(target.group.id)
-                  || !ready
+                answer == nil || draft.sending || !ready
               )
               .help(
                 target.group.questions.count > 1
@@ -193,12 +191,22 @@ struct QuestionForm: View {
     draft.sending = true
     draft.errors.removeValue(forKey: group.id)
     let values = answers(for: group)
+    let next =
+      targets.dropFirst(currentIndex + 1).first { $0.group.id != group.id }
+      ?? targets.prefix(currentIndex).last { $0.group.id != group.id }
     Task { @MainActor in
       let error = await answer(conversation, group, values)
       draft.sending = false
       draft.errors[group.id] = error
-      if error == nil || error == QuestionDeliveryError.uncertain.localizedDescription {
-        draft.submitted.insert(group.id)
+      if error == QuestionDeliveryError.uncertain.localizedDescription {
+        draft.uncertain.insert(group.id)
+      } else if error == nil {
+        draft.currentID = next?.id
+        for question in group.questions {
+          let key = "\(group.id):\(question.index)"
+          draft.words.removeValue(forKey: key)
+          draft.choices.removeValue(forKey: key)
+        }
       }
     }
   }
