@@ -1,6 +1,6 @@
-import ApplicationServices
-import AppKit
 import AXWidgetCore
+import AppKit
+import ApplicationServices
 import Foundation
 
 /// Replies to the question card displayed by Codex Desktop when its local
@@ -22,7 +22,9 @@ enum CodexDesktopQuestions {
 
   static func window(pid: pid_t, session: String) -> AXUIElement? {
     guard let title = CodexWindowIdentity.title(sessionID: session) else { return nil }
-    let windows = WindowAX.windows(pid).filter { WindowAX.name($0) == title && WindowAX.isStandardWindow($0) }
+    let windows = WindowAX.windows(pid).filter {
+      WindowAX.name($0) == title && WindowAX.isStandardWindow($0)
+    }
     return windows.count == 1 ? windows[0] : nil
   }
 
@@ -47,7 +49,9 @@ enum CodexDesktopQuestions {
         guard controls.count < 160, buttons(controls, named: "Send").count == 1,
           buttons(controls, named: "Skip").count == 1,
           !controls.contains(where: { ["Stop", "Add files and more"].contains(label($0)) }),
-          controls.contains(where: { ["AXStaticText", "AXHeading"].contains(role($0)) && label($0) == title })
+          controls.contains(where: {
+            ["AXStaticText", "AXHeading"].contains(role($0)) && label($0) == title
+          })
         else { continue }
         return Form(controls: controls, submit: send)
       }
@@ -70,49 +74,66 @@ enum CodexDesktopQuestions {
   private static func click(_ control: AXUIElement, in window: AXUIElement, pid: pid_t) throws {
     let app = AXUIElementCreateApplication(pid)
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-      let focused = WindowAX.value(app, kAXFocusedWindowAttribute), CFEqual(focused as CFTypeRef, window),
-      CGPreflightPostEventAccess(), let rect = WindowAX.frame(control), rect.width > 1, rect.height > 1,
+      let focused = WindowAX.value(app, kAXFocusedWindowAttribute),
+      CFEqual(focused as CFTypeRef, window),
+      CGPreflightPostEventAccess(), let rect = WindowAX.frame(control), rect.width > 1,
+      rect.height > 1,
       let bounds = WindowAX.frame(window)
-    else { throw QuestionDeliveryError.unavailable("Codex lost focus before the question control could be clicked.") }
-    let point = [0.5, 0.25, 0.75].map { CGPoint(x: rect.minX + rect.width * $0, y: rect.midY) }.first { point in
-      var hit: AXUIElement?
-      return bounds.contains(point)
-        && AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit) == .success
-        && hit.map { belongs($0, to: control) } == true
+    else {
+      throw QuestionDeliveryError.unavailable(
+        "Codex lost focus before the question control could be clicked.")
     }
+    let point = [0.5, 0.25, 0.75].map { CGPoint(x: rect.minX + rect.width * $0, y: rect.midY) }
+      .first { point in
+        var hit: AXUIElement?
+        return bounds.contains(point)
+          && AXUIElementCopyElementAtPosition(
+            AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit) == .success
+          && hit.map { belongs($0, to: control) } == true
+      }
     guard let point,
-      let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-      let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-    else { throw QuestionDeliveryError.unavailable("The Codex question control is covered or outside the visible window.") }
+      let down = CGEvent(
+        mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point,
+        mouseButton: .left),
+      let up = CGEvent(
+        mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point,
+        mouseButton: .left)
+    else {
+      throw QuestionDeliveryError.unavailable(
+        "The Codex question control is covered or outside the visible window.")
+    }
     down.setIntegerValueField(.mouseEventClickState, value: 1)
     up.setIntegerValueField(.mouseEventClickState, value: 1)
     down.post(tap: .cghidEventTap)
     up.post(tap: .cghidEventTap)
   }
 
-  private static func fill(_ form: Form, question: AgentQuestion, values: [String], window: AXUIElement, pid: pid_t) async throws {
+  private static func fill(
+    _ form: Form, question: AgentQuestion, values: [String], window: AXUIElement, pid: pid_t
+  ) async throws {
     guard !values.isEmpty else { throw QuestionDeliveryError.questionNotFound }
     let labels = Set(question.options.map(\.label))
     let fields = form.controls.filter { ["AXTextArea", "AXTextField"].contains(role($0)) }
-    // Async choices and typed answers both produce the same per-question text
-    // receipt in Codex. Its editable card can accept the exact widget answer.
-    let useField = question.allowsText && fields.count == 1 && !question.multiple
-    let choices = useField ? [] : values.filter { labels.contains($0) }
+    let choices = values.filter { labels.contains($0) }
     for choice in choices {
       let matching = form.controls.filter {
         ["AXRadioButton", "AXCheckBox", "AXButton"].contains(role($0)) && label($0) == choice
       }
       guard matching.count == 1, let control = matching.first else {
-        throw QuestionDeliveryError.unavailable("Codex did not expose the selected option in this question card.")
+        throw QuestionDeliveryError.unavailable(
+          "Codex did not expose the selected option in this question card.")
       }
       let value = WindowAX.value(control, kAXValueAttribute)
-      if (value as? NSNumber)?.intValue != 1 && value as? String != "1" {
+      if role(control) == "AXRadioButton"
+        || ((value as? NSNumber)?.intValue != 1 && value as? String != "1")
+      {
         guard AXUIElementPerformAction(control, kAXPressAction as CFString) == .success else {
-          throw QuestionDeliveryError.unavailable("Codex could not select the answer in its question card.")
+          throw QuestionDeliveryError.unavailable(
+            "Codex could not select the answer in its question card.")
         }
       }
     }
-    let words = useField ? values : values.filter { !labels.contains($0) }
+    let words = values.filter { !labels.contains($0) }
     if !words.isEmpty {
       let text = words.joined(separator: ", ")
       guard question.allowsText, fields.count == 1, let field = fields.first else {
@@ -120,13 +141,25 @@ enum CodexDesktopQuestions {
       }
       func contents() -> String { WindowAX.value(field, kAXValueAttribute) as? String ?? "" }
       if contents() == text { return }
-      guard contents().isEmpty else {
-        throw QuestionDeliveryError.unavailable("The original question field already contains a different draft.")
+      let original = contents()
+      // Setting a Chromium textarea takes effect on a later renderer tick.
+      // Replace only this matching question's draft with the user's submitted text.
+      if AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, text as CFString)
+        == .success
+      {
+        for _ in 0..<12 where contents() != text { try await Task.sleep(nanoseconds: 30_000_000) }
+        if contents() == text { return }
+      }
+      guard original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, contents() == original
+      else {
+        throw QuestionDeliveryError.unavailable(
+          "Codex could not update the existing draft in this question.")
       }
       let app = AXUIElementCreateApplication(pid)
       func hasFocus() -> Bool {
         guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-          let raw = WindowAX.value(app, kAXFocusedUIElementAttribute) else { return false }
+          let raw = WindowAX.value(app, kAXFocusedUIElementAttribute)
+        else { return false }
         return belongs(raw as! AXUIElement, to: field)
       }
       _ = AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
@@ -148,7 +181,8 @@ enum CodexDesktopQuestions {
       }
       for _ in 0..<20 where contents() != text { try await Task.sleep(nanoseconds: 40_000_000) }
       guard contents() == text else {
-        throw QuestionDeliveryError.unavailable("Codex did not confirm the text in the question field.")
+        throw QuestionDeliveryError.unavailable(
+          "Codex did not confirm the text in the question field.")
       }
     }
   }
@@ -161,7 +195,8 @@ enum CodexDesktopQuestions {
     let previous = NSWorkspace.shared.frontmostApplication
     defer {
       if previous?.processIdentifier != pid,
-        NSWorkspace.shared.frontmostApplication?.processIdentifier == pid {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+      {
         previous?.activate(options: [])
       }
     }
@@ -174,7 +209,8 @@ enum CodexDesktopQuestions {
         try await Task.sleep(nanoseconds: 120_000_000)
       } while Date() < deadline
       guard let target else {
-        throw QuestionDeliveryError.unavailable("Codex did not expose a unique window for this chat.")
+        throw QuestionDeliveryError.unavailable(
+          "Codex did not expose a unique window for this chat.")
       }
       try await WindowAX.focus(target, pid: pid)
       var found: Form?
@@ -188,19 +224,25 @@ enum CodexDesktopQuestions {
       func isPending() throws -> Bool {
         let pending = try TranscriptReader.pendingQuestions(source)
         let matches = pending.flatMap(\.questions).filter { $0.title == question.title }
-        return matches.count == 1 && pending.contains { $0.id == group.id && $0.questions.contains(question) }
+        return matches.count == 1
+          && pending.contains { $0.id == group.id && $0.questions.contains(question) }
       }
       guard let values = answers[question.id], try isPending()
-      else { throw QuestionDeliveryError.unavailable("This question changed or has more than one matching card.") }
+      else {
+        throw QuestionDeliveryError.unavailable(
+          "This question changed or has more than one matching card.")
+      }
       try await fill(card, question: question, values: values, window: target, pid: pid)
       var ready: Form?
       let readyBy = Date().addingTimeInterval(2)
       repeat {
         guard let current = window(pid: pid, session: session), CFEqual(current, target) else {
-          throw QuestionDeliveryError.unavailable("The Codex window changed before the answer was sent.")
+          throw QuestionDeliveryError.unavailable(
+            "The Codex window changed before the answer was sent.")
         }
         if let card = form(in: target, question: question),
-          WindowAX.value(card.submit, kAXEnabledAttribute) as? Bool == true {
+          WindowAX.value(card.submit, kAXEnabledAttribute) as? Bool == true
+        {
           ready = card
           break
         }

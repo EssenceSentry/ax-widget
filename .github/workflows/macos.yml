@@ -4,11 +4,16 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      intel:
+        description: Use an Intel macOS runner for the universal build
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   native:
-    runs-on: macos-15
+    runs-on: ${{ inputs.intel && 'macos-15-intel' || 'macos-15' }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     timeout-minutes: 25
