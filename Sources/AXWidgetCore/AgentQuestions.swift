@@ -46,6 +46,7 @@ public struct AgentQuestionGroup: Codable, Equatable, Identifiable, Sendable {
 struct QuestionTracker {
   var groups: [String: AgentQuestionGroup] = [:]
   var order: [String] = []
+  private(set) var recentReplies: [(call: String, index: Int, answer: String)] = []
   var pending: [AgentQuestionGroup] { order.compactMap { groups[$0] } }
 
   mutating func consume(_ row: [String: Any]) {
@@ -132,22 +133,31 @@ struct QuestionTracker {
   }
 
   private mutating func consumeReplies(_ text: String) {
+    for item in Self.replies(text) {
+      recentReplies.append(item)
+      if recentReplies.count > 32 { recentReplies.removeFirst() }
+      groups[item.call]?.questions.removeAll { $0.index == item.index }
+      if groups[item.call]?.questions.isEmpty == true { groups.removeValue(forKey: item.call) }
+    }
+  }
+
+  static func replies(_ text: String) -> [(call: String, index: Int, answer: String)] {
     guard let start = text.range(of: "<send_user_message_question_reply>"),
       let end = text.range(
         of: "</send_user_message_question_reply>", range: start.upperBound..<text.endIndex)
-    else { return }
+    else { return [] }
     let body = String(text[start.upperBound..<end.lowerBound]).trimmingCharacters(
       in: .whitespacesAndNewlines)
     guard let data = body.data(using: .utf8),
       let items = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]]
-    else { return }
-    for item in items {
+    else { return [] }
+    return items.compactMap { item in
       guard let key = item["questionItemId"] as? String, let data = key.data(using: .utf8),
         let parts = (try? JSONSerialization.jsonObject(with: data)) as? [Any], parts.count == 3,
-        let call = parts[1] as? String, let index = parts[2] as? Int
-      else { continue }
-      groups[call]?.questions.removeAll { $0.index == index }
-      if groups[call]?.questions.isEmpty == true { groups.removeValue(forKey: call) }
+        parts[0] as? String == "request_user_input_async", let call = parts[1] as? String,
+        let index = parts[2] as? Int, let answer = item["answer"] as? String
+      else { return nil }
+      return (call, index, answer)
     }
   }
 }

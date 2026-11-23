@@ -63,7 +63,7 @@ struct QuestionForm: View {
           if error == QuestionDeliveryError.accessibilityRequired.localizedDescription,
             let settings = URL(string: "ax-widget://accessibility")
           {
-            Link("Enable Claude replies…", destination: settings).font(.system(size: 11))
+            Link("Enable question replies…", destination: settings).font(.system(size: 11))
           }
         }
         HStack(spacing: 10) {

@@ -210,6 +210,8 @@ public func usageHelp(_ allowance: Allowance?) -> String {
 }
 
 public func reset(_ allowance: Allowance?) -> String {
+  if let allowance, allowance.provider == .claude, allowance.resets == nil,
+    allowance.remaining() == 100 { return "No reset scheduled" }
   guard let date = allowance?.resets else { return "Reset time unavailable" }
   return "Resets \(date.formatted(.dateTime.weekday(.abbreviated).hour().minute()))"
 }

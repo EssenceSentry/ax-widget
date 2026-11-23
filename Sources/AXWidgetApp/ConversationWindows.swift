@@ -1024,17 +1024,22 @@ enum WindowAX {
         guard let rect = frame(node) else { return true }
         return rect.minY < bounds.minY + 65 || rect.height > bounds.height / 2
       })
-    let blankDocument = header.contains {
+    let blankDocuments = header.filter {
       value($0, kAXRoleAttribute) as? String == "AXWebArea"
         && String(describing: value($0, "AXURL") ?? "") == "about:blank"
     }
+    // Current Claude gives both the native pop-out and its blank document the
+    // registered session title. Its previous renderer exposed a return button.
+    if blankDocuments.count == 1, let document = blankDocuments.first,
+      name(document) == title, isStandardWindow(window), claudeMainURL(window) == nil
+    { return true }
     let returnButton = header.contains { node in
       guard value(node, kAXRoleAttribute) as? String == "AXButton",
         name(node) == "Open in main window", let rect = frame(node)
       else { return false }
       return rect.minY < bounds.minY + 65 && rect.height <= 40
     }
-    return blankDocument && returnButton
+    return !blankDocuments.isEmpty && returnButton
   }
 
   static func frame(_ element: AXUIElement) -> CGRect? {
@@ -1151,32 +1156,36 @@ enum WindowAX {
       if let cursor { CGWarpMouseCursorPosition(cursor) }
     }
     if shownSidebar { try await Task.sleep(nanoseconds: 250_000_000) }
-    let controls = navigationNodes(window, bounds: bounds).filter { node in
-      guard
-        ["AXLink", "AXRow", "AXButton"].contains(value(node, kAXRoleAttribute) as? String ?? ""),
-        let bounds, let rect = frame(node)
-      else { return false }
-      return rect.minX >= bounds.minX && rect.maxX <= bounds.minX + 360
-        && rect.minY >= bounds.minY + 65 && rect.width >= 100 && rect.height > 0
-        && rect.height < 120
-    }
     guard let id = pin.desktopSessionID,
       let currentTitle = ClaudeWindowIdentity.title(desktopSessionID: id)
     else { throw WindowGroupError.ambiguous }
-    let candidates = controls.filter {
-      name($0) == currentTitle || name($0).hasPrefix(currentTitle + " ")
-    }
-    lastNavigation +=
-      ["expected=\(currentTitle)", "sidebarOpened=\(shownSidebar)"]
-      + Array(controls.prefix(30)).map {
-        name($0) + " " + (frame($0).map { NSStringFromRect($0) } ?? "")
+    // The first session can start immediately below the 36-point title bar.
+    // Off-screen rows can still be scrolled into view by Accessibility.
+    func sidebarRows() -> [AXUIElement] {
+      navigationNodes(window, bounds: bounds).filter { node in
+        guard let bounds, let rect = frame(node),
+          ["AXLink", "AXRow", "AXButton"].contains(value(node, kAXRoleAttribute) as? String ?? ""),
+          rect.minX >= bounds.minX, rect.minX < bounds.minX + 100,
+          rect.maxX <= bounds.minX + 360, rect.width >= 100, (1..<120).contains(rect.height)
+        else { return false }
+        let name = name(node)
+        return name == currentTitle || name.hasPrefix(currentTitle + " ")
       }
+    }
+    var candidates = sidebarRows()
+    if shownSidebar, candidates.isEmpty {
+      try await Task.sleep(nanoseconds: 250_000_000)
+      candidates = sidebarRows()
+    }
+    lastNavigation += ["sidebarOpened=\(shownSidebar)", "matchingRows=\(candidates.count)"]
     guard candidates.count == 1, let row = candidates.first else {
       throw WindowGroupError.claudeRowUnavailable
     }
     AXUIElementPerformAction(row, "AXScrollToVisible" as CFString)
     try await Task.sleep(nanoseconds: 150_000_000)
-    guard let rect = frame(row) else { throw WindowGroupError.ambiguous }
+    guard let rect = frame(row), let bounds, rect.midY >= bounds.minY + 36,
+      bounds.contains(CGPoint(x: rect.midX, y: rect.midY))
+    else { throw WindowGroupError.claudeRowUnavailable }
     AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
@@ -1217,6 +1226,19 @@ enum WindowAX {
         } ?? [],
       ]
       if let app {
+        if provider == .codex {
+          result["questionCards"] = SnapshotStore.read().conversations
+            .filter { $0.provider == .codex && $0.needsAttention }.flatMap { conversation in
+              let window = CodexDesktopQuestions.window(pid: app.processIdentifier, session: conversation.sessionID)
+              return (conversation.questions ?? []).filter { $0.kind == .codexAsync }.flatMap { group in
+                group.questions.map { question -> [String: Any] in
+                  let card = window.flatMap { CodexDesktopQuestions.form(in: $0, question: question) }
+                  return ["window": window != nil, "card": card != nil,
+                    "sendEnabled": card.flatMap { value($0.submit, kAXEnabledAttribute) as? Bool } ?? false]
+                }
+              }
+            }
+        }
         let element = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(element, 0.3)
         if let menu = value(element, kAXMenuBarAttribute) {
@@ -1232,11 +1254,14 @@ enum WindowAX {
             guard
               [
                 "AXWebArea", "AXLink", "AXRow", "AXButton", "AXMenuItem", "AXComboBox",
-                "AXTextField",
+                "AXTextField", "AXTextArea", "AXRadioButton", "AXCheckBox",
               ].contains(role)
             else { return nil }
             return [
               "role": role, "name": name(node),
+              "enabled": (value(node, kAXEnabledAttribute) as? Bool).map(String.init) ?? "",
+              "selected": ["AXRadioButton", "AXCheckBox"].contains(role)
+                ? (value(node, kAXValueAttribute) as? NSNumber)?.stringValue ?? "" : "",
               "url": String(describing: value(node, "AXURL") ?? ""),
               "identifier": String(describing: value(node, kAXIdentifierAttribute) ?? ""),
               "domID": String(describing: value(node, "AXDOMIdentifier") ?? ""),

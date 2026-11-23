@@ -10,6 +10,14 @@ public struct TranscriptUpdate: Equatable {
 }
 
 public enum TranscriptReader {
+  public static func pendingQuestions(_ url: URL) throws -> [AgentQuestionGroup] {
+    try QuestionJournal.pending(url)
+  }
+
+  public static func confirmedReply(_ url: URL, call: String, index: Int, answer: String) throws -> Bool {
+    try QuestionJournal.confirmed(url, call: call, index: index, answer: answer)
+  }
+
   public static func isMainConversation(_ url: URL, registeredDesktop: Bool = false) -> Bool {
     guard let handle = try? FileHandle(forReadingFrom: url) else { return true }
     defer { try? handle.close() }

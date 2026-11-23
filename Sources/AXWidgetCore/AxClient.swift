@@ -10,11 +10,16 @@ public enum AxClient {
     return candidates.first { FileManager.default.isExecutableFile(atPath: $0.path) }
   }
 
-  /// Snapshot only. No --refresh, model calls, messages, alarms, or task creation.
   public static func usage(executable: URL) throws -> [Allowance] {
+    try usageReport(executable: executable, refreshClaude: false).allowances
+  }
+
+  public static func usageReport(executable: URL, refreshClaude: Bool) throws
+    -> (allowances: [Allowance], claudeError: String?)
+  {
     let process = Process()
     process.executableURL = executable
-    process.arguments = ["usage"]
+    process.arguments = refreshClaude ? ["usage", "--refresh"] : ["usage"]
     let file = FileManager.default.temporaryDirectory.appendingPathComponent(
       "ax-widget-" + UUID().uuidString)
     FileManager.default.createFile(
@@ -32,7 +37,7 @@ public enum AxClient {
     }
     process.environment = environment
     try process.run()
-    let deadline = Date().addingTimeInterval(12)
+    let deadline = Date().addingTimeInterval(refreshClaude ? 60 : 12)
     while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.05) }
     if process.isRunning {
       process.terminate()
@@ -45,14 +50,20 @@ public enum AxClient {
     let data = try Data(contentsOf: file)
     guard data.count <= 2_097_152 else { throw ClientError.invalid }
     guard process.terminationStatus == 0 else { throw ClientError.unavailable }
-    return try decodeUsage(data)
+    return try decodeReport(data)
   }
 
   public static func decodeUsage(_ data: Data) throws -> [Allowance] {
+    try decodeReport(data).allowances
+  }
+
+  private static func decodeReport(_ data: Data) throws
+    -> (allowances: [Allowance], claudeError: String?)
+  {
     guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
       let windows = object["windows"] as? [[String: Any]]
     else { throw ClientError.invalid }
-    return windows.compactMap { row in
+    let allowances: [Allowance] = windows.compactMap { row in
       guard let provider = Provider(rawValue: row["provider"] as? String ?? ""),
         let name = row["name"] as? String
       else { return nil }
@@ -64,8 +75,18 @@ public enum AxClient {
         provider: provider, name: name, used: used, observed: parseDate(row["observed"]),
         resets: parseDate(row["resets"]), status: row["status"] as? String ?? "unavailable")
     }
+    return (allowances, object["claude_refresh_error"] as? String)
   }
 
+  public static func needsClaudeRefresh(_ allowances: [Allowance], at now: Date) -> Bool {
+    ["five_hour", "weekly_all"].contains { name in
+      guard let row = allowances.first(where: { $0.provider == .claude && $0.name == name }),
+        row.remaining(at: now) != nil, let observed = row.observed
+      else { return true }
+      return now.timeIntervalSince(observed) >= 210
+        || (row.resets.map { $0.timeIntervalSince(now) < 65 } ?? false)
+    }
+  }
   public enum ClientError: LocalizedError {
     case timeout, unavailable, invalid
     public var errorDescription: String? {

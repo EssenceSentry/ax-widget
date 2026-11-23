@@ -77,6 +77,28 @@ private func codexAsk(_ call: String = "call-widget", multiple: Bool = false) th
   #expect(pending.questions.map(\.id) == ["second"])
 }
 
+@Test func desktopSendRequiresTheExactRecordedUserReply() throws {
+  let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".jsonl")
+  defer { try? FileManager.default.removeItem(at: file) }
+  let request = try codexAsk()
+  let group = try #require(TranscriptReader.parse([request]).questions.first)
+  let body = try group.codexReply(["next": ["Continue"]])
+  func message(_ role: String) throws -> String {
+    try line(["type": "response_item", "payload": ["type": "message", "role": role,
+      "content": [["type": "input_text", "text": body]]]])
+  }
+  try (request + "\n" + message("assistant") + "\n").write(to: file, atomically: true, encoding: .utf8)
+  #expect(try !TranscriptReader.confirmedReply(file, call: group.id, index: 0, answer: "Continue"))
+  let handle = try FileHandle(forWritingTo: file)
+  defer { try? handle.close() }
+  try handle.seekToEnd()
+  try handle.write(contentsOf: Data((message("user") + "\n").utf8))
+  #expect(try TranscriptReader.confirmedReply(file, call: group.id, index: 0, answer: "Continue"))
+  #expect(try !TranscriptReader.confirmedReply(file, call: group.id, index: 1, answer: "Continue"))
+  #expect(try !TranscriptReader.confirmedReply(file, call: group.id, index: 0, answer: "Wait"))
+  #expect(try TranscriptReader.pendingQuestions(file).isEmpty)
+}
+
 @Test func oldQuestionsDoNotSurviveANewOrAbortedCodexTurn() throws {
   let old = try codexAsk("old-turn")
   let newTurn = try line(["type": "event_msg", "payload": ["type": "task_started"]])

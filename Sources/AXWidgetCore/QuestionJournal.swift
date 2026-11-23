@@ -18,6 +18,15 @@ enum QuestionJournal {
   ].map { Data($0.utf8) }
   private static let boundaryMarkers = ["task_started", "turn_aborted"].map { Data($0.utf8) }
 
+  static func confirmed(_ url: URL, call: String, index: Int, answer: String) throws -> Bool {
+    _ = try pending(url)
+    lock.lock()
+    defer { lock.unlock() }
+    return cursors[url.path]?.tracker.recentReplies.contains {
+      $0.call == call && $0.index == index && $0.answer == answer
+    } == true
+  }
+
   static func pending(_ url: URL) throws -> [AgentQuestionGroup] {
     lock.lock()
     defer { lock.unlock() }

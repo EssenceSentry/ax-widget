@@ -48,7 +48,7 @@ public struct Allowance: Codable, Identifiable, Equatable, Sendable {
   public func remaining(at now: Date = Date()) -> Double? {
     guard status == "fresh", let used, used.isFinite, (0...100).contains(used),
       let observed, (-60...300).contains(now.timeIntervalSince(observed)),
-      let resets, resets > now
+      resets.map({ $0 > now }) ?? (provider == .claude && used == 0)
     else { return nil }
     return 100 - used
   }

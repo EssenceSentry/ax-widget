@@ -136,7 +136,7 @@ import Foundation
     widgets.target = self
     if !ClaudeQuestionClient.isTrusted {
       let replies = menu.addItem(
-        withTitle: "Enable window control and Claude replies…",
+        withTitle: "Enable window control and question replies…",
         action: #selector(enableClaudeReplies),
         keyEquivalent: "")
       replies.target = self
@@ -353,9 +353,7 @@ import Foundation
       return "The windows are being arranged. Try sending again in a moment."
     }
     guard !store.demo, !answering, !store.hasSent(group, in: conversation),
-      let source = conversation.source,
-      let fresh = try? TranscriptReader.read(URL(fileURLWithPath: source)),
-      fresh.questions.contains(group), let url = conversation.deepLink
+      let path = conversation.source, let url = conversation.deepLink
     else {
       return
         "This question has changed or is no longer awaiting an answer. Refresh or open the conversation."
@@ -371,6 +369,11 @@ import Foundation
     }
     answering = true
     defer { answering = false }
+    let source = URL(fileURLWithPath: path)
+    let pending = await Task.detached {
+      (try? TranscriptReader.pendingQuestions(source))?.contains(group) == true
+    }.value
+    guard pending else { return "This question is no longer pending in the conversation history." }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = false
     do {
@@ -380,8 +383,7 @@ import Foundation
       if let active = NSRunningApplication.runningApplications(
         withBundleIdentifier: conversation.provider.bundleIdentifier
       ).first,
-        (conversation.provider == .codex && store.group.pins.contains { $0.provider == .codex })
-          || store.group.contains(conversation)
+        conversation.provider == .codex || store.group.contains(conversation)
       {
         running = active
       } else {
@@ -389,14 +391,36 @@ import Foundation
           [url], withApplicationAt: app, configuration: configuration)
       }
       let pid = running.processIdentifier
-      try await Task.detached(priority: .userInitiated) {
-        if conversation.provider == .codex {
-          try CodexQuestionClient.reply(
-            sessionID: conversation.sessionID, group: group, answers: answers)
-        } else {
-          try ClaudeQuestionClient.reply(pid: pid, group: group, answers: answers)
+      if conversation.provider == .codex {
+        do {
+          try await Task.detached(priority: .userInitiated) {
+            try CodexQuestionClient.reply(sessionID: conversation.sessionID, group: group, answers: answers)
+          }.value
+        } catch QuestionDeliveryError.unavailable where group.kind == .codexAsync {
+          guard ClaudeQuestionClient.isTrusted else { throw QuestionDeliveryError.accessibilityRequired }
+          floating.setPresentingNativeQuestion(true)
+          defer { floating.setPresentingNativeQuestion(false) }
+          let visible = await Task.detached {
+            CodexDesktopQuestions.window(pid: pid, session: conversation.sessionID) != nil
+          }.value
+          if !visible {
+            let pins = store.group.pins.filter { $0.provider == .codex }
+            if pins.isEmpty {
+              _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
+            } else if !store.group.contains(conversation) {
+              try await conversationWindows.openOutsideGroup(ConversationPin(conversation), protecting: pins)
+            }
+          }
+          try await Task.detached(priority: .userInitiated) {
+            try await CodexDesktopQuestions.reply(
+              pid: pid, session: conversation.sessionID, source: source, group: group, answers: answers)
+          }.value
         }
-      }.value
+      } else {
+        try await Task.detached(priority: .userInitiated) {
+          try ClaudeQuestionClient.reply(pid: pid, group: group, answers: answers)
+        }.value
+      }
       store.didSend(group, in: conversation)
       return nil
     } catch { return error.localizedDescription }

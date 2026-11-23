@@ -13,6 +13,7 @@ import WidgetKit
   private var refreshPending = false
   private var timer: Timer?
   private var lastUsage = Date.distantPast
+  private var lastClaudeAttempt = Date.distantPast
   private var lastWidgetReload = Date.distantPast
   private var usage: [Allowance] = []
   private var usageIssue: String?
@@ -225,11 +226,28 @@ import WidgetKit
   private func refreshUsage(force: Bool) {
     guard !usageRefreshing, force || Date().timeIntervalSince(lastUsage) >= 60 else { return }
     usageRefreshing = true
+    let now = Date()
+    let canRefreshClaude = now.timeIntervalSince(lastClaudeAttempt) >= 180
+    let previousIssue = usageIssue
     usageQueue.async { [weak self] in
       var allowances: [Allowance]?
       var issue: String?
+      var attempted = false
       if let binary = AxClient.executable() {
-        do { allowances = try AxClient.usage(executable: binary) } catch {
+        do {
+          let cached = try AxClient.usage(executable: binary)
+          allowances = cached
+          if AxClient.needsClaudeRefresh(cached, at: now) {
+            if canRefreshClaude {
+              attempted = true
+              let report = try AxClient.usageReport(executable: binary, refreshClaude: true)
+              allowances = report.allowances
+              issue = report.claudeError.map { "Claude usage: " + $0 }
+            } else {
+              issue = previousIssue
+            }
+          }
+        } catch {
           issue = error.localizedDescription
         }
       } else {
@@ -237,6 +255,7 @@ import WidgetKit
       }
       Task { @MainActor in
         guard let self else { return }
+        if attempted { self.lastClaudeAttempt = now }
         self.usageRefreshing = false
         self.lastUsage = Date()
         if let allowances { self.usage = allowances }

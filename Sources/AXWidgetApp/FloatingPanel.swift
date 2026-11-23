@@ -18,6 +18,7 @@ private final class UtilityPanel: NSPanel {
   private var globalMonitor: Any?
   private var localMonitor: Any?
   private var presentation: FloatingPresentation
+  private var presentingNativeQuestion = false
   private var expanded: Bool { presentation.isExpanded }
   var keepFloating: Bool { presentation.keepFloating }
   private var contentHeight: CGFloat = 0
@@ -98,12 +99,22 @@ private final class UtilityPanel: NSPanel {
   }
 
   private func applyVisibility() {
+    if presentingNativeQuestion {
+      panel.orderOut(nil)
+      details.orderOut(nil)
+      return
+    }
     if presentation.usageVisible { panel.orderFrontRegardless() } else { panel.orderOut(nil) }
     if presentation.conversationsVisible {
       details.orderFrontRegardless()
     } else {
       details.orderOut(nil)
     }
+  }
+
+  func setPresentingNativeQuestion(_ active: Bool) {
+    presentingNativeQuestion = active
+    applyVisibility()
   }
 
   func expand() {
@@ -243,6 +254,7 @@ private final class UtilityPanel: NSPanel {
   }
 
   private func outsideClick() {
+    guard !presentingNativeQuestion else { return }
     // Let the status button handle its own toggle; collapsing on mouse-down
     // would otherwise reopen the panel on the same click's mouse-up.
     if isTriggerClick?(NSEvent.mouseLocation) == true { return }

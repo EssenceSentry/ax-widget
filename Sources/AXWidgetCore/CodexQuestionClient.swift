@@ -10,7 +10,7 @@ public enum QuestionDeliveryError: LocalizedError {
     case .unavailable(let message): message
     case .uncertain: "The agent did not confirm delivery. Open the conversation before retrying."
     case .accessibilityRequired:
-      "Allow AX Widget in macOS Accessibility settings to answer Claude questions."
+      "Allow AX Widget in macOS Accessibility settings to answer questions in the desktop app."
     case .questionNotFound:
       "The original question is no longer visible in the native app. Open the conversation to check it."
     }
@@ -35,19 +35,21 @@ public enum CodexQuestionClient {
       FileManager.default.temporaryDirectory.appendingPathComponent(
         "codex-ipc/ipc-\(getuid()).sock"),
     ]
-    guard
-      let endpoint = candidates.first(where: { url in
-        guard let info = try? FileManager.default.attributesOfItem(atPath: url.path) else {
-          return false
-        }
-        return info[.type] as? FileAttributeType == .typeSocket
-          && (info[.ownerAccountID] as? NSNumber)?.uint32Value == getuid()
-      })
-    else {
-      throw QuestionDeliveryError.unavailable(
-        "Open this conversation in Codex, then send the answer again.")
+    var connected: NativeCodexConnection?
+    for url in candidates {
+      guard let info = try? FileManager.default.attributesOfItem(atPath: url.path),
+        info[.type] as? FileAttributeType == .typeSocket,
+        (info[.ownerAccountID] as? NSNumber)?.uint32Value == getuid()
+      else { continue }
+      if let connection = try? NativeCodexConnection(endpoint: url) {
+        connected = connection
+        break
+      }
     }
-    let client = try NativeCodexConnection(endpoint: endpoint)
+    guard let client = connected else {
+      throw QuestionDeliveryError.unavailable(
+        "Codex's native reply connection is unavailable.")
+    }
     let initialized = try client.request("initialize", params: ["clientType": "ax"], version: 0)
     guard let result = initialized["result"] as? [String: Any],
       let id = result["clientId"] as? String,

@@ -70,11 +70,11 @@ With the [build prerequisites](#build) installed, run `swift run AXWidget --demo
   When an agent asks several questions together, fill them in and use **Send answers**.
   Clicking the text field clears the selected choices. The send button appears
   only once the required answers have a selection or nonempty text.
-- Claude inline answers require macOS Accessibility permission, because the
-  installed client handles question submission inside its renderer. AX Widget
-  matches the original question and submit control; ambiguous forms stay unanswered.
-  Without this permission, **Open Claude** remains available.
-  Choose **Enable window control and Claude replies…** from the menu-bar menu or the question form
+- Claude handles inline answers in its native question form. Codex uses its
+  local reply connection when available. If it is disconnected, AX Widget can
+  answer a live Codex question in its native card and confirm the reply in the
+  original chat. Native form access requires macOS Accessibility permission.
+  Choose **Enable window control and question replies…** from the menu-bar menu or the question form
   to request access, then enable **AX Widget** in macOS Accessibility settings.
   Background refresh never requests permission. Answers submitted in Claude
   clear from the widget when its native tool-result record is saved.
@@ -82,7 +82,9 @@ With the [build prerequisites](#build) installed, run `swift run AXWidget --demo
   After five minutes without a fresh observation, a small clock and a dimmer
   continuous ring mark the cached reading; hover for its age and reset time.
   Freshness validation remains separate from this display cache.
-- Unknown, unavailable, expired, and stale Claude usage shows a neutral track and an em dash.
+- AX Widget refreshes Claude's five-hour and weekly allowances with its built-in
+  quota command as their observations age. A fresh 0% used reading can have no
+  scheduled reset. Unknown, unavailable, expired, and stale readings show a neutral track and an em dash.
 - All rings use continuous strokes. The supplied OpenAI and Claude SVG marks stay
   vector artwork; OpenAI adapts to the selected appearance.
 - The menu-bar icon is a pure-white axe silhouette. Right-click it to control Keep floating,
@@ -129,8 +131,9 @@ requires macOS Accessibility access for AX Widget. It uses native conversation
 navigation and Open in New Window actions; it sends no prompts, creates no
 conversations, and does not interrupt running agents. Ambiguous or unavailable
 window targets produce an error rather than selecting another conversation.
-Claude's main window exposes its session URL; its compact pop-outs expose a native
-title and return-to-main-window control. Codex also exposes a native title. AX Widget
+Claude's main window exposes its session URL. Its compact pop-outs expose the registered
+chat title on the window and its document, or a return-to-main-window control on older versions.
+Codex also exposes a native title. AX Widget
 checks titles against the corresponding provider's local registration/history and
 accepts only unique matches; duplicate titles must be renamed before pinning.
 Use ordinary desktop windows on one display; leave full screen before arranging.
@@ -229,8 +232,9 @@ tasks through its local socket and reads recent transcript tails for prose.
 Question cursors start at the latest Codex turn, discard prompts from earlier or interrupted turns, and retain pending
 questions through lengthy tool output within that turn. Existing conversation
 files are watched for changes, coalesced over 200 milliseconds, with a four-second
-discovery/fallback poll. Usage comes from `ax usage` once per minute, without
-`--refresh`, on a separate queue so allowance reads cannot delay questions.
+discovery/fallback poll. A separate queue reads `ax usage` once per minute. When Claude's
+observation approaches five minutes, the widget requests `ax usage --refresh`.
+Failed quota requests are spaced at least three minutes apart.
 Reads are performed off the main thread. Shared snapshots have owner-only permissions.
 
 Claude conversations need an existing Desktop registration. If one is absent,

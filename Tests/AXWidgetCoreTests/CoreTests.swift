@@ -127,6 +127,22 @@ private let now = Date(timeIntervalSince1970: 1_800_000_000)
   #expect(snapshot.claudeWeekly?.remaining(at: now) == 41)
 }
 
+@Test func freshUnusedClaudeWindowsCanHaveNoResetDate() {
+  var session = Allowance(
+    provider: .claude, name: "five_hour", used: 0, observed: now, resets: nil, status: "fresh")
+  var week = session
+  week.name = "weekly_all"
+  #expect(session.remaining(at: now) == 100)
+  #expect(session.remaining(at: now.addingTimeInterval(301)) == nil)
+  #expect(!AxClient.needsClaudeRefresh([session, week], at: now))
+  #expect(AxClient.needsClaudeRefresh([session], at: now))
+  #expect(AxClient.needsClaudeRefresh([session, week], at: now.addingTimeInterval(215)))
+  session.used = 35
+  #expect(session.remaining(at: now) == nil)
+  week.provider = .codex
+  #expect(week.remaining(at: now) == nil)
+}
+
 @Test func idleCodexDisplayKeepsItsObservationWithoutClaimingItIsFresh() {
   var value = Allowance(
     provider: .codex, name: "primary", used: 48,
