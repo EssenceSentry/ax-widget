@@ -46,15 +46,23 @@ public struct AgentQuestionGroup: Codable, Equatable, Identifiable, Sendable {
 struct QuestionTracker {
   var groups: [String: AgentQuestionGroup] = [:]
   var order: [String] = []
+  private var codexTurnID: String?
   private(set) var recentReplies: [(call: String, index: Int, answer: String)] = []
   var pending: [AgentQuestionGroup] { order.compactMap { groups[$0] } }
 
   mutating func consume(_ row: [String: Any]) {
     let type = row["type"] as? String
     let payload = row["payload"] as? [String: Any] ?? [:]
-    if type == "event_msg", let event = payload["type"] as? String,
-      ["task_started", "turn_aborted"].contains(event)
-    {
+    if type == "event_msg" {
+      let turnID = payload["turn_id"] as? String
+      switch payload["type"] as? String {
+      case "task_started":
+        codexTurnID = turnID
+      case "task_complete", "turn_aborted":
+        if let active = codexTurnID, let ended = turnID, active != ended { return }
+      default:
+        return
+      }
       groups.removeAll()
       order.removeAll()
       return

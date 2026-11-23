@@ -99,18 +99,54 @@ private func codexAsk(_ call: String = "call-widget", multiple: Bool = false) th
   #expect(try TranscriptReader.pendingQuestions(file).isEmpty)
 }
 
-@Test func oldQuestionsDoNotSurviveANewOrAbortedCodexTurn() throws {
+@Test func onlyTheCurrentCodexTurnKeepsPendingQuestions() throws {
   let old = try codexAsk("old-turn")
   let newTurn = try line(["type": "event_msg", "payload": ["type": "task_started"]])
   let complete = try line(["type": "event_msg", "payload": ["type": "task_complete"]])
   let aborted = try line(["type": "event_msg", "payload": ["type": "turn_aborted"]])
   #expect(TranscriptReader.parse([old, newTurn, complete]).questions.isEmpty)
   let current = try codexAsk("current-turn")
-  #expect(
-    TranscriptReader.parse([old, newTurn, current, complete]).questions.map(\.id) == [
-      "current-turn"
-    ])
+  #expect(TranscriptReader.parse([old, newTurn, current]).questions.map(\.id) == ["current-turn"])
+  #expect(TranscriptReader.parse([old, newTurn, current, complete]).questions.isEmpty)
   #expect(TranscriptReader.parse([newTurn, current, aborted]).questions.isEmpty)
+}
+
+@Test func completionClearsTheLastOpenCardOnRefreshAndRelaunch() throws {
+  let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+  defer { try? FileManager.default.removeItem(at: folder) }
+  let source = folder.appendingPathComponent("chat.jsonl")
+  func event(_ name: String, _ turn: String) throws -> String {
+    try line(["type": "event_msg", "payload": ["type": name, "turn_id": turn]])
+  }
+  let answered = try codexAsk("answered")
+  let group = try #require(TranscriptReader.parse([answered]).questions.first)
+  let reply = try group.codexReply(["next": ["Continue"]])
+  let rows = try [
+    line(["type": "session_meta", "payload": ["id": "fixture"]]),
+    event("task_started", "active"), codexAsk("still-open"), answered,
+    line(["type": "response_item", "payload": [
+      "type": "message", "role": "user", "content": [["type": "input_text", "text": reply]],
+    ]]),
+    event("task_complete", "older"), event("turn_aborted", "older"),
+    line(["type": "response_item", "payload": [
+      "type": "function_call_output", "call_id": "some-job", "output": "task_complete",
+    ]]),
+  ]
+  try (rows.joined(separator: "\n") + "\n").write(to: source, atomically: true, encoding: .utf8)
+  #expect(try TranscriptReader.read(source).questions.map(\.id) == ["still-open"])
+  let writer = try FileHandle(forWritingTo: source)
+  try writer.seekToEnd()
+  try writer.write(contentsOf: Data((event("task_complete", "active") + "\n").utf8))
+  try writer.close()
+  let cold = folder.appendingPathComponent("restart.jsonl")
+  try FileManager.default.copyItem(at: source, to: cold)
+  for file in [source, cold] {
+    let update = try TranscriptReader.read(file)
+    #expect(!update.needsInput && update.questions.isEmpty)
+    #expect(try TranscriptReader.confirmedReply(file, call: "answered", index: 0, answer: "Continue"))
+    #expect(try !TranscriptReader.confirmedReply(file, call: "still-open", index: 0, answer: "Continue"))
+  }
 }
 
 @Test func coldQuestionReaderStartsAtLatestTurnAcrossLargeRecords() throws {

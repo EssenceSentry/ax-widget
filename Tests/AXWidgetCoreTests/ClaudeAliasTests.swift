@@ -117,3 +117,50 @@ private func registration(_ id: String, desktop: String, prior: [String] = []) -
   #expect(result.map(\.id) == [new.id, other.id])
   #expect(result.first?.title == "New")
 }
+
+@Test func claudeWidgetRowsRequireAVisibleDesktopRegistrationEvenWhenPinned() throws {
+  let now = Date()
+  let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+  defer { try? FileManager.default.removeItem(at: home) }
+  let paths = LocalPaths(home: home)
+  let active = paths.claudeDesktop.appendingPathComponent("account-a/org")
+  let other = paths.claudeDesktop.appendingPathComponent("account-b/org")
+  let project = paths.claudeHome.appendingPathComponent("projects/-fixture-project")
+  for folder in [active, other, project, paths.axData] {
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+  }
+  func write(_ value: [String: Any], to file: URL) throws {
+    try JSONSerialization.data(withJSONObject: value).write(to: file)
+  }
+  try write(["lastKnownAccountUuid": "account-a"],
+    to: paths.claudeDesktop.deletingLastPathComponent().appendingPathComponent("config.json"))
+  var db: OpaquePointer?
+  sqlite3_open(paths.axData.appendingPathComponent("catalog.sqlite3").path, &db)
+  defer { sqlite3_close(db) }
+  func sql(_ text: String) throws { try #require(sqlite3_exec(db, text, nil, nil, nil) == SQLITE_OK) }
+  try sql("CREATE TABLE conversations(provider TEXT,id TEXT,title TEXT,project TEXT,source TEXT,updated REAL,mtime REAL)")
+  func add(_ id: String, to folder: URL) throws {
+    let native = "local_" + id
+    try write(registration(id, desktop: native), to: folder.appendingPathComponent(native + ".json"))
+  }
+  let visible = UUID().uuidString, indexed = UUID().uuidString, closed = UUID().uuidString
+  let deleted = UUID().uuidString, otherAccount = UUID().uuidString
+  for id in [visible, indexed, closed, deleted, otherAccount] {
+    let source = project.appendingPathComponent(id + ".jsonl")
+    try write(["type": "user", "entrypoint": "claude-desktop",
+      "timestamp": ISO8601DateFormatter().string(from: now), "message": ["content": "Hi"]], to: source)
+    try sql("INSERT INTO conversations VALUES('claude','\(id)','Catalog title','','\(source.path)',\(now.timeIntervalSince1970),\(now.timeIntervalSince1970))")
+  }
+  for id in [visible, closed, deleted] { try add(id, to: active) }
+  try add(otherAccount, to: other)
+  try write(["v": 1, "archived": ["local_" + closed]], to: active.appendingPathComponent("archived-sessions.idx"))
+  try Data().write(to: active.appendingPathComponent("deleted_" + deleted))
+  let stale = ConversationPin(Conversation(provider: .claude, sessionID: indexed, title: "Old pin",
+    updated: now, desktopSessionID: "local_" + indexed))
+  let repo = LocalRepository(paths: paths)
+  #expect(repo.conversations(at: now, pins: [stale]).items.map(\.sessionID) == [visible])
+  try add(indexed, to: active)
+  let eligible = repo.conversations(at: now, pins: [stale]).items
+  #expect(eligible.map(\.sessionID) == [indexed, visible])
+  #expect(eligible.allSatisfy { $0.deepLink != nil })
+}

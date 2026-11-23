@@ -16,7 +16,8 @@ enum QuestionJournal {
   private static let requestMarkers = [
     "request_user_input", "AskUserQuestion", "send_user_message_question_reply",
   ].map { Data($0.utf8) }
-  private static let boundaryMarkers = ["task_started", "turn_aborted"].map { Data($0.utf8) }
+  private static let turnStart = Data("task_started".utf8)
+  private static let boundaryMarkers = [turnStart, Data("task_complete".utf8), Data("turn_aborted".utf8)]
 
   static func confirmed(_ url: URL, call: String, index: Int, answer: String) throws -> Bool {
     _ = try pending(url)
@@ -87,8 +88,8 @@ enum QuestionJournal {
     tracker.consume(row)
   }
 
-  /// Codex questions belong to the turn that asked them. Find its boundary
-  /// backwards using cheap byte checks, rather than replaying years of history.
+  /// Replay from the start of the latest turn so its ID and exact answer
+  /// receipts are still available even when its completion has been written.
   private static func latestTurnOffset(_ file: FileHandle, size: UInt64) throws -> UInt64 {
     try file.seek(toOffset: 0)
     let header = try file.read(upToCount: 65_536) ?? Data()
@@ -108,12 +109,11 @@ enum QuestionJournal {
       for line in complete.reversed() {
         guard line.count < 4096 else { continue }
         let data = Data(line)
-        guard boundaryMarkers.contains(where: { data.range(of: $0) != nil }),
+        guard data.range(of: turnStart) != nil,
           let row = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
           row["type"] as? String == "event_msg",
           let payload = row["payload"] as? [String: Any],
-          let event = payload["type"] as? String,
-          ["task_started", "turn_aborted"].contains(event)
+          payload["type"] as? String == "task_started"
         else { continue }
         return start + UInt64(line.startIndex - chunk.startIndex)
       }

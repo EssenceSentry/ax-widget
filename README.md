@@ -66,6 +66,8 @@ With the [build prerequisites](#build) installed, run `swift run AXWidget --demo
   submits the selected response to that same
   conversation. Once delivery succeeds, the answered questions disappear immediately.
   The next pending question stays available, and the indicator clears after the last answer.
+  When Codex finishes or interrupts a turn, the widget also removes any unanswered
+  questions from that turn on the next refresh.
   A failed send keeps the draft. An unconfirmed send asks you to check the conversation.
   When an agent asks several questions together, fill them in and use **Send answers**.
   Clicking the text field clears the selected choices. The send button appears
@@ -226,20 +228,22 @@ these are not evidence of system-widget hosting.
 
 The app lists active, registered Codex chats from the native thread database.
 It selects interactive CLI, Desktop and VS Code chats before applying the display
-limit. Headless runs and delegated workers stay out of the list. Claude chats
-come from the ax catalog and Claude Desktop registrations. The app queries ax
+limit. Headless runs and delegated workers stay out of the list. The widget lists
+Claude chats registered for the active Desktop account and organization. Desktop's
+archive and deletion records apply to pinned chats too. The ax catalog supplies
+transcript paths for those registrations. The app queries ax
 tasks through its local socket and reads recent transcript tails for prose.
-Question cursors start at the latest Codex turn, discard prompts from earlier or interrupted turns, and retain pending
-questions through lengthy tool output within that turn. Existing conversation
+Question cursors start at the latest Codex turn and retain its unanswered questions
+through lengthy tool output until a reply, completion, or interruption. Existing conversation
 files are watched for changes, coalesced over 200 milliseconds, with a four-second
 discovery/fallback poll. A separate queue reads `ax usage` once per minute. When Claude's
 observation approaches five minutes, the widget requests `ax usage --refresh`.
 Failed quota requests are spaced at least three minutes apart.
 Reads are performed off the main thread. Shared snapshots have owner-only permissions.
 
-Claude conversations need an existing Desktop registration. If one is absent,
-the app explains that ax registers eligible sessions while Claude Desktop is
-fully quit. No new conversation or paid continuation is created as a fallback.
+Eligible CLI and VS Code conversations appear in the widget once ax registers
+them while Claude Desktop is fully quit. A saved pin becomes visible again if
+its conversation returns to Desktop.
 
 Background refresh makes no model calls and sends no messages. Opening a native
 new-chat composer is not a model turn. Sending an answer is an explicit user

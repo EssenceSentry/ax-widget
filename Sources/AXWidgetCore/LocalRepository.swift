@@ -30,23 +30,30 @@ public struct LocalRepository {
     let aliases = ClaudeSessionAliases(records: records, paths: paths)
     let saved = WidgetConversationPins(pins: pins.map(aliases.resolve))
     let pinnedIDs = Set(saved.pins.map(\.id))
-    for pin in saved.pins where pin.provider == .claude { found[pin.id] = pin.conversation }
+    let visibleRecords = records.filter { $0["isArchived"] as? Bool != true }
+    let claudeIDs = Array(Set(visibleRecords.compactMap { $0["cliSessionId"] as? String }))
+    // Pins and ax supply titles and transcript locations. Only a current
+    // Desktop registration can put a Claude conversation in the widget.
+    var claudeDetails = Dictionary(uniqueKeysWithValues:
+      saved.pins.filter { $0.provider == .claude }.map { ($0.id, $0.conversation) })
     var issues: [String] = []
-    var excluded: Set<String> = []
     var codexHasSource = false
     let catalog = paths.axData.appendingPathComponent("catalog.sqlite3")
-    if FileManager.default.fileExists(atPath: catalog.path) {
+    if !claudeIDs.isEmpty, FileManager.default.fileExists(atPath: catalog.path) {
       do {
         let db = try ReadOnlyDatabase(url: catalog)
-        for row in try db.rows("SELECT * FROM conversations WHERE provider='claude' ORDER BY mtime DESC LIMIT 40") {
-          guard let provider = Provider(rawValue: row["provider"] ?? ""), let id = row["id"],
-            UUID(uuidString: id) != nil
-          else { continue }
-          let item = Conversation(
-            provider: provider, sessionID: id, title: row["title"] ?? "Untitled",
-            project: row["project"] ?? "", source: row["source"],
-            updated: parseDate(row["updated"]) ?? .distantPast)
-          if aliases.key(item.id) == item.id { found[item.id] = item }
+        for start in stride(from: 0, to: claudeIDs.count, by: 500) {
+          let ids = Array(claudeIDs[start..<min(start + 500, claudeIDs.count)])
+          let placeholders = ids.map { _ in "?" }.joined(separator: ",")
+          let query = "SELECT id,title,project,source,updated FROM conversations WHERE provider='claude' AND id IN (\(placeholders))"
+          for row in try db.rows(query, strings: ids) {
+            guard let id = row["id"] else { continue }
+            let item = Conversation(
+              provider: .claude, sessionID: id, title: row["title"] ?? "Untitled",
+              project: row["project"] ?? "", source: row["source"],
+              updated: parseDate(row["updated"]) ?? .distantPast)
+            claudeDetails[item.id] = item
+          }
         }
       } catch { issues.append("ax conversation index: \(error.localizedDescription)") }
     }
@@ -65,26 +72,23 @@ public struct LocalRepository {
       }
     } catch { issues.append("Codex history: \(error.localizedDescription)") }
 
-    for record in records {
+    for record in visibleRecords {
       guard let id = record["cliSessionId"] as? String, UUID(uuidString: id) != nil else {
         continue
       }
       let key = "claude:\(id)"
-      if record["isArchived"] as? Bool == true {
-        excluded.insert(key)
-        continue
-      }
       let cwd = record["cwd"] as? String ?? ""
       let encoded = cwd.replacingOccurrences(
         of: "[^A-Za-z0-9]", with: "-", options: .regularExpression)
       var item =
-        found[key]
+        claudeDetails[key]
         ?? Conversation(
           provider: .claude, sessionID: id,
           title: record["title"] as? String ?? "Claude conversation", project: cwd,
           source: paths.claudeHome.appendingPathComponent("projects/\(encoded)/\(id).jsonl").path,
           updated: parseDate(record["lastActivityAt"] ?? record["createdAt"]) ?? .distantPast)
       item.desktopSessionID = record["sessionId"] as? String
+      guard item.deepLink != nil else { continue }
       if let title = record["title"] as? String, !title.isEmpty { item.title = title }
       if let date = parseDate(record["lastActivityAt"]), date > item.updated { item.updated = date }
       found[key] = item
@@ -121,7 +125,6 @@ public struct LocalRepository {
     // Filter SDK workers before limiting candidates: many recent worker sessions
     // must not crowd older, real conversations out of the widget.
     let candidates = found.values.filter { item in
-      guard !excluded.contains(item.id) else { return false }
       let modified = item.source.flatMap {
         try? URL(fileURLWithPath: $0).resourceValues(forKeys: [.contentModificationDateKey])
           .contentModificationDate
@@ -167,27 +170,52 @@ public struct LocalRepository {
 
   func desktopRecords() -> [[String: Any]] {
     let manager = FileManager.default
-    var rows: [[String: Any]] = []
-    guard
-      let accounts = try? manager.contentsOfDirectory(
-        at: paths.claudeDesktop, includingPropertiesForKeys: nil)
-    else { return [] }
-    for account in accounts
-    where (try? account.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-      for org in (try? manager.contentsOfDirectory(at: account, includingPropertiesForKeys: nil))
-        ?? [] where (try? org.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-      {
-        for file in (try? manager.contentsOfDirectory(at: org, includingPropertiesForKeys: nil))
-          ?? []
-        where file.lastPathComponent.hasPrefix("local_") && file.pathExtension == "json" {
-          if let data = try? Data(contentsOf: file), data.count < 1_048_576,
-            let value = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-          {
-            rows.append(value)
-          }
-        }
+    func directories(_ root: URL) -> [URL] {
+      let entries = (try? manager.contentsOfDirectory(at: root,
+        includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+      return entries.filter { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true }
+    }
+    func object(_ url: URL) -> [String: Any]? {
+      guard let data = try? Data(contentsOf: url), data.count < 8_388_608 else { return nil }
+      return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+    }
+    func selected(_ folders: [URL], id: String?) -> URL? {
+      if let id { return folders.first { $0.lastPathComponent == id } }
+      return folders.count == 1 ? folders.first : nil
+    }
+    let config = paths.claudeDesktop.deletingLastPathComponent().appendingPathComponent("config.json")
+    let accountID = object(config)?["lastKnownAccountUuid"] as? String
+    guard let account = selected(directories(paths.claudeDesktop), id: accountID) else { return [] }
+    let orgs = directories(account)
+    var orgID: String?
+    if orgs.count > 1 {
+      let config = paths.claudeHome.deletingLastPathComponent().appendingPathComponent(".claude.json")
+      let identity = object(config)?["oauthAccount"] as? [String: Any]
+      if identity?["accountUuid"] as? String == account.lastPathComponent {
+        orgID = identity?["organizationUuid"] as? String
       }
     }
-    return rows
+    guard let org = selected(orgs, id: orgID),
+      let entries = try? manager.contentsOfDirectory(at: org, includingPropertiesForKeys: nil)
+    else { return [] }
+    let index = object(org.appendingPathComponent("archived-sessions.idx"))
+    let archived = Set((index?["archived"] as? [String] ?? []).map {
+      URL(fileURLWithPath: $0).deletingPathExtension().lastPathComponent
+    })
+    let deleted = Set(entries.map(\.lastPathComponent).filter { $0.hasPrefix("deleted_") }
+      .map { String($0.dropFirst("deleted_".count)) })
+    return entries.compactMap { file in
+      let nativeID = file.deletingPathExtension().lastPathComponent
+      guard file.pathExtension == "json", nativeID.hasPrefix("local_"),
+        var record = object(file), record["sessionId"] as? String == nativeID
+      else { return nil }
+      let suffix = String(nativeID.dropFirst("local_".count))
+      if archived.contains(nativeID) || archived.contains(suffix) || deleted.contains(suffix)
+        || (record["cliSessionId"] as? String).map(deleted.contains) == true
+      {
+        record["isArchived"] = true
+      }
+      return record
+    }
   }
 }
