@@ -69,6 +69,16 @@ enum CodexDesktopQuestions {
     return false
   }
 
+  private static func hasFocus(_ control: AXUIElement, in window: AXUIElement, pid: pid_t) -> Bool {
+    let app = AXUIElementCreateApplication(pid)
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+      let active = WindowAX.value(app, kAXFocusedWindowAttribute),
+      CFEqual(active as CFTypeRef, window),
+      let element = WindowAX.value(app, kAXFocusedUIElementAttribute)
+    else { return false }
+    return belongs(element as! AXUIElement, to: control)
+  }
+
   /// Electron can acknowledge AXPress on Send without dispatching the click.
   /// Verify the focused provider window and hit-test the visible control.
   private static func click(_ control: AXUIElement, in window: AXUIElement, pid: pid_t) throws {
@@ -108,14 +118,41 @@ enum CodexDesktopQuestions {
     up.post(tap: .cghidEventTap)
   }
 
+  private static func submit(_ button: AXUIElement, in window: AXUIElement, pid: pid_t) async throws {
+    // A reflowed Electron card can report a stale screen position. Space on
+    // its verified, focused Send button activates the native control directly.
+    _ = AXUIElementSetAttributeValue(button, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    for _ in 0..<8 where !hasFocus(button, in: window, pid: pid) {
+      try await Task.sleep(nanoseconds: 35_000_000)
+    }
+    if hasFocus(button, in: window, pid: pid), CGPreflightPostEventAccess(),
+      let down = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: true),
+      let up = CGEvent(keyboardEventSource: nil, virtualKey: 49, keyDown: false)
+    {
+      down.postToPid(pid)
+      up.postToPid(pid)
+      return
+    }
+    try click(button, in: window, pid: pid)
+  }
+
   private static func fill(
     _ form: Form, question: AgentQuestion, values: [String], window: AXUIElement, pid: pid_t
   ) async throws {
     guard !values.isEmpty else { throw QuestionDeliveryError.questionNotFound }
     let labels = Set(question.options.map(\.label))
     let fields = form.controls.filter { ["AXTextArea", "AXTextField"].contains(role($0)) }
-    let choices = values.filter { labels.contains($0) }
-    for choice in choices {
+    // Codex records an async answer as one string, including a suggested
+    // choice. Its editable response works for both, even on releases whose
+    // native radio buttons acknowledge AXPress without selecting the option.
+    if question.allowsText, fields.count == 1, let field = fields.first {
+      try await enter(values.joined(separator: ", "), in: field, form: form, window: window, pid: pid)
+      return
+    }
+    for choice in values {
+      guard labels.contains(choice) else {
+        throw QuestionDeliveryError.unavailable("Codex did not expose the question’s text field.")
+      }
       let matching = form.controls.filter {
         ["AXRadioButton", "AXCheckBox", "AXButton"].contains(role($0)) && label($0) == choice
       }
@@ -133,57 +170,60 @@ enum CodexDesktopQuestions {
         }
       }
     }
-    let words = values.filter { !labels.contains($0) }
-    if !words.isEmpty {
-      let text = words.joined(separator: ", ")
-      guard question.allowsText, fields.count == 1, let field = fields.first else {
-        throw QuestionDeliveryError.unavailable("Codex did not expose the question’s text field.")
-      }
-      func contents() -> String { WindowAX.value(field, kAXValueAttribute) as? String ?? "" }
-      if contents() == text { return }
-      let original = contents()
-      // Setting a Chromium textarea takes effect on a later renderer tick.
-      // Replace only this matching question's draft with the user's submitted text.
-      if AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, text as CFString)
-        == .success
-      {
-        for _ in 0..<12 where contents() != text { try await Task.sleep(nanoseconds: 30_000_000) }
-        if contents() == text { return }
-      }
-      guard original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, contents() == original
+  }
+
+  private static func enter(
+    _ text: String, in field: AXUIElement, form: Form, window: AXUIElement, pid: pid_t
+  ) async throws {
+    func contents() -> String { WindowAX.value(field, kAXValueAttribute) as? String ?? "" }
+    func accepted() -> Bool {
+      contents() == text && WindowAX.value(form.submit, kAXEnabledAttribute) as? Bool == true
+    }
+    if accepted() { return }
+    // Setting a Chromium textarea takes effect on a later renderer tick.
+    // Replace only this matching question's draft with the user's submitted text.
+    if AXUIElementSetAttributeValue(field, kAXValueAttribute as CFString, text as CFString)
+      == .success
+    {
+      for _ in 0..<12 where !accepted() { try await Task.sleep(nanoseconds: 30_000_000) }
+      if accepted() { return }
+    }
+    func fieldFocused() -> Bool { hasFocus(field, in: window, pid: pid) }
+    _ = AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    for _ in 0..<6 where !fieldFocused() { try await Task.sleep(nanoseconds: 25_000_000) }
+    if !fieldFocused() { try click(field, in: window, pid: pid) }
+    for _ in 0..<15 where !fieldFocused() { try await Task.sleep(nanoseconds: 30_000_000) }
+    guard fieldFocused() else {
+      throw QuestionDeliveryError.unavailable("Codex lost focus in the question field.")
+    }
+    let draft = contents()
+    if !draft.isEmpty {
+      var range = CFRange(location: 0, length: draft.utf16.count)
+      guard let selection = AXValueCreate(.cfRange, &range),
+        AXUIElementSetAttributeValue(field, kAXSelectedTextRangeAttribute as CFString, selection)
+          == .success,
+        WindowAX.value(field, kAXSelectedTextAttribute) as? String == draft
       else {
-        throw QuestionDeliveryError.unavailable(
-          "Codex could not update the existing draft in this question.")
+        throw QuestionDeliveryError.unavailable("Codex could not select the existing draft in this question.")
       }
-      let app = AXUIElementCreateApplication(pid)
-      func hasFocus() -> Bool {
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
-          let raw = WindowAX.value(app, kAXFocusedUIElementAttribute)
-        else { return false }
-        return belongs(raw as! AXUIElement, to: field)
-      }
-      _ = AXUIElementSetAttributeValue(field, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-      for _ in 0..<6 where !hasFocus() { try await Task.sleep(nanoseconds: 25_000_000) }
-      if !hasFocus() { try click(field, in: window, pid: pid) }
-      for _ in 0..<15 where !hasFocus() { try await Task.sleep(nanoseconds: 30_000_000) }
-      // Deliver literal Unicode text only to the verified question field.
-      // Never use Return, the clipboard, or the general conversation composer.
-      for character in text {
-        guard hasFocus(),
-          let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-          let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-        else { throw QuestionDeliveryError.unavailable("Codex lost focus in the question field.") }
-        let units = Array(String(character).utf16)
-        down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-        up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-        down.postToPid(pid)
-        up.postToPid(pid)
-      }
-      for _ in 0..<20 where contents() != text { try await Task.sleep(nanoseconds: 40_000_000) }
-      guard contents() == text else {
-        throw QuestionDeliveryError.unavailable(
-          "Codex did not confirm the text in the question field.")
-      }
+    }
+    // Deliver literal Unicode text only to the verified question field.
+    // Never use Return, the clipboard, or the general conversation composer.
+    for character in text {
+      guard fieldFocused(),
+        let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+        let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+      else { throw QuestionDeliveryError.unavailable("Codex lost focus in the question field.") }
+      let units = Array(String(character).utf16)
+      down.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+      up.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+      down.postToPid(pid)
+      up.postToPid(pid)
+    }
+    for _ in 0..<20 where !accepted() { try await Task.sleep(nanoseconds: 40_000_000) }
+    guard accepted() else {
+      throw QuestionDeliveryError.unavailable(
+        "Codex did not confirm the text in the question field.")
     }
   }
 
@@ -252,7 +292,7 @@ enum CodexDesktopQuestions {
         throw QuestionDeliveryError.unavailable("Codex has not enabled Send for this question.")
       }
       guard try isPending() else { throw QuestionDeliveryError.questionNotFound }
-      try click(ready.submit, in: target, pid: pid)
+      try await submit(ready.submit, in: target, pid: pid)
       let until = Date().addingTimeInterval(8)
       while (try? TranscriptReader.confirmedReply(
         source, call: group.id, index: question.index, answer: values.joined(separator: ", ")

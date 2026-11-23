@@ -72,8 +72,8 @@ With the [build prerequisites](#build) installed, run `swift run AXWidget --demo
   only once the required answers have a selection or nonempty text.
 - Claude handles inline answers in its native question form. Codex uses its
   local reply connection when available. If it is disconnected, AX Widget can
-  answer a live Codex question in its native card and confirm the reply in the
-  original chat. Native form access requires macOS Accessibility permission.
+  send the selected option or your own text through the live question card.
+  It checks that the original chat received the exact answer. Native form access requires macOS Accessibility permission.
   Choose **Enable window control and question replies…** from the menu-bar menu or the question form
   to request access, then enable **AX Widget** in macOS Accessibility settings.
   Background refresh never requests permission. Answers submitted in Claude
