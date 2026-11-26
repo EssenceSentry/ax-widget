@@ -13,17 +13,18 @@ enum ClaudeQuestionClient {
       [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary)
   }
 
-  static func reply(pid: Int32, group: AgentQuestionGroup, answers: [String: [String]]) throws {
+  static func reply(in window: AXUIElement, pin: ConversationPin, group: AgentQuestionGroup,
+    answers: [String: [String]]) throws {
     guard isTrusted else { throw QuestionDeliveryError.accessibilityRequired }
     guard group.kind == .claude, !group.questions.isEmpty else {
       throw AxClient.ClientError.invalid
     }
-    let app = AXUIElementCreateApplication(pid)
-    AXUIElementSetMessagingTimeout(app, 1)
+    guard WindowAX.matches(window, pin: pin) else { throw WindowGroupError.changed }
+    AXUIElementSetMessagingTimeout(window, 1)
     let deadline = Date().addingTimeInterval(10)
     var form: AccessibilityNode?
     while Date() < deadline {
-      let tree = AccessibilityNode.tree(app, deadline: deadline)
+      let tree = AccessibilityNode.tree(window, deadline: deadline)
       form = matchingForms(tree, group: group).first
       if form != nil { break }
       Thread.sleep(forTimeInterval: 0.2)
@@ -62,7 +63,8 @@ enum ClaudeQuestionClient {
         else { throw QuestionDeliveryError.questionNotFound }
       }
     }
-    let refreshed = AccessibilityNode.tree(app, deadline: Date().addingTimeInterval(4))
+    guard WindowAX.matches(window, pin: pin) else { throw WindowGroupError.changed }
+    let refreshed = AccessibilityNode.tree(window, deadline: Date().addingTimeInterval(4))
     guard let submit = matchingForms(refreshed, group: group).first?.submitButtons.first,
       AXUIElementPerformAction(submit.element, kAXPressAction as CFString) == .success
     else { throw QuestionDeliveryError.questionNotFound }

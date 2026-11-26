@@ -95,10 +95,11 @@ With the [build prerequisites](#build) installed, run `swift run AXWidget --demo
 ## Conversation window group
 
 Use the overlapping-windows icon beside a title to add up to three conversations
-to a window group. This opens that exact conversation in its own native Claude or
-Codex window and arranges the group side by side on the widget's display. Claude uses its compact, sidebar-free
-conversation pop-outs. Codex uses separate native windows with the conversation
-sidebar collapsed (its slim navigation rail remains). The separate toolbar pin still means
+to a window group. AX Widget looks for the chat in the provider's open windows,
+including minimized windows, before it opens one. It can use Claude's main Code
+window, a Claude pop-out, or a Codex window directly in the split. The widget
+arranges the windows side by side and collapses the conversation sidebar where
+the app exposes that control. The separate toolbar pin still means
 **Keep floating**; it does not pin a conversation.
 
 - **Show group** (overlapping rectangles) restores and raises all grouped windows
@@ -128,8 +129,9 @@ sidebar collapsed (its slim navigation rail remains). The separate toolbar pin s
   both widget pins and window-group members. Subsequent changes are independent.
   The menu-bar menu has separate **Pinned to widget** and **Grouped windows** lists.
 
-These are ordinary app windows, without an always-on-top level. Group control
-requires macOS Accessibility access for AX Widget. It uses native conversation
+These are ordinary app windows, without an always-on-top level. Opening an
+existing chat and controlling a group require macOS Accessibility access for
+AX Widget so it can identify the right window. It uses native conversation
 navigation and Open in New Window actions; it sends no prompts, creates no
 conversations, and does not interrupt running agents. Ambiguous or unavailable
 window targets produce an error rather than selecting another conversation.
@@ -141,10 +143,11 @@ accepts only unique matches; duplicate titles must be renamed before pinning.
 Use ordinary desktop windows on one display; leave full screen before arranging.
 
 The arrow beside a grouped chat raises the whole split and preserves its layout.
-The arrow beside another chat opens that conversation outside the split. Adding a
-chat to the split reuses its existing Codex window or moves it into a compact
-Claude pop-out. AX Widget closes a verified duplicate regular view after the split
-is ready. If the app cannot safely close that view, the panel tells you.
+The arrow beside another chat brings its existing window forward, even with an
+empty split. If the chat moved to a different window, the widget follows the
+chat there. When a chat needs to open alongside an existing split, the widget
+uses a separate destination and verifies the split members still show their
+chats. A saved window number or position alone cannot identify a conversation.
 
 ## Notification Center and desktop widget
 

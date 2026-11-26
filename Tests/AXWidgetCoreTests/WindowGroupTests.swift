@@ -42,6 +42,20 @@ private func chat(_ index: Int, date: Date = Date()) -> Conversation {
   #expect(ConversationGroup(pins: [ConversationPin(item)]).pins.isEmpty)
 }
 
+@Test func rotatedClaudeSessionKeepsOneWindowGroupMember() throws {
+  var original = chat(1)
+  original.provider = .claude
+  original.desktopSessionID = "local_49267bbb-44fa-4919-9ef3-2414eb412b06"
+  var resumed = original
+  resumed.sessionID = chat(2).sessionID
+  let groupPins = [original, resumed].map(ConversationPin.init)
+  var group = ConversationGroup(pins: groupPins)
+  try group.add(resumed)
+  #expect(group.pins == [groupPins[0]])
+  #expect(group.contains(resumed))
+  #expect(group.ordered([chat(3), resumed], limit: 2).map(\.id) == [resumed.id, chat(3).id])
+}
+
 @Test func pinnedOldChatsRemainAlongsideRecentActivityInStableOrder() throws {
   let now = Date()
   let older = chat(1, date: now.addingTimeInterval(-48 * 3600))

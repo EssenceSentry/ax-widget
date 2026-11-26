@@ -11,6 +11,11 @@ public struct ConversationPin: Codable, Equatable, Identifiable, Sendable {
   public var source: String?
   public var id: String { "\(provider.rawValue):\(sessionID)" }
 
+  public func matches(_ chat: Conversation) -> Bool {
+    id == chat.id || (provider == .claude && chat.provider == .claude
+      && desktopSessionID != nil && desktopSessionID == chat.desktopSessionID)
+  }
+
   public init(_ conversation: Conversation) {
     provider = conversation.provider
     sessionID = conversation.sessionID
@@ -30,31 +35,26 @@ public struct ConversationPin: Codable, Equatable, Identifiable, Sendable {
 public struct ConversationGroup: Codable, Equatable, Sendable {
   public private(set) var pins: [ConversationPin]
   public init(pins: [ConversationPin] = []) {
-    var seen: Set<String> = []
-    self.pins = Array(
-      pins.filter {
-        $0.conversation.deepLink != nil && seen.insert($0.id).inserted
-      }.prefix(3))
+    self.pins = []
+    for pin in pins where pin.conversation.deepLink != nil && !contains(pin.conversation) {
+      self.pins.append(pin)
+      if self.pins.count == 3 { break }
+    }
   }
   public mutating func add(_ conversation: Conversation) throws {
-    guard !pins.contains(where: { $0.id == conversation.id }) else { return }
+    guard !contains(conversation) else { return }
     guard pins.count < 3 else { throw WindowGroupError.full }
     guard conversation.deepLink != nil else { throw WindowGroupError.unregistered }
     pins.append(ConversationPin(conversation))
   }
   public mutating func remove(_ id: String) { pins.removeAll { $0.id == id } }
   public func contains(_ chat: Conversation) -> Bool {
-    pins.contains { pin in
-      pin.id == chat.id
-        || (pin.provider == .claude && chat.provider == .claude
-          && pin.desktopSessionID != nil && pin.desktopSessionID == chat.desktopSessionID)
-    }
+    pins.contains { $0.matches(chat) }
   }
   public func ordered(_ conversations: [Conversation], limit: Int) -> [Conversation] {
-    let ids = Set(pins.map(\.id))
-    let pinned = pins.compactMap { pin in conversations.first { $0.id == pin.id } }
+    let pinned = pins.compactMap { pin in conversations.first(where: pin.matches) }
     return pinned
-      + conversations.filter { !ids.contains($0.id) }
+      + conversations.filter { !contains($0) }
       .sorted { $0.updated > $1.updated }.prefix(max(0, limit - pinned.count))
   }
 }

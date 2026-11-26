@@ -59,16 +59,6 @@ enum CodexDesktopQuestions {
     return nil
   }
 
-  private static func belongs(_ hit: AXUIElement, to control: AXUIElement) -> Bool {
-    var element = hit
-    for _ in 0..<8 {
-      if CFEqual(element, control) { return true }
-      guard let parent = WindowAX.value(element, kAXParentAttribute) else { break }
-      element = parent as! AXUIElement
-    }
-    return false
-  }
-
   private static func hasFocus(_ control: AXUIElement, in window: AXUIElement, pid: pid_t) -> Bool {
     let app = AXUIElementCreateApplication(pid)
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
@@ -76,7 +66,7 @@ enum CodexDesktopQuestions {
       CFEqual(active as CFTypeRef, window),
       let element = WindowAX.value(app, kAXFocusedUIElementAttribute)
     else { return false }
-    return belongs(element as! AXUIElement, to: control)
+    return WindowAX.belongs(element as! AXUIElement, to: control)
   }
 
   /// Electron can acknowledge AXPress on Send without dispatching the click.
@@ -99,7 +89,7 @@ enum CodexDesktopQuestions {
         return bounds.contains(point)
           && AXUIElementCopyElementAtPosition(
             AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit) == .success
-          && hit.map { belongs($0, to: control) } == true
+          && hit.map { WindowAX.belongs($0, to: control) } == true
       }
     guard let point,
       let down = CGEvent(

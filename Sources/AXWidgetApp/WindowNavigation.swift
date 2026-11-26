@@ -4,9 +4,27 @@ import ApplicationServices
 import Carbon.HIToolbox
 
 extension WindowAX {
+  static func belongs(_ hit: AXUIElement, to control: AXUIElement) -> Bool {
+    var element = hit
+    for _ in 0..<12 {
+      if CFEqual(element, control) { return true }
+      guard let parent = value(element, kAXParentAttribute) else { break }
+      element = parent as! AXUIElement
+    }
+    return false
+  }
+
   static func isStandardWindow(_ window: AXUIElement) -> Bool {
     value(window, kAXRoleAttribute) as? String == kAXWindowRole
       && value(window, kAXSubroleAttribute) as? String == kAXStandardWindowSubrole
+  }
+
+  // AppKit can report the same ordinary window as AXDialog while it is in the Dock.
+  static func isConversationWindow(_ window: AXUIElement) -> Bool {
+    guard value(window, kAXRoleAttribute) as? String == kAXWindowRole else { return false }
+    let subrole = value(window, kAXSubroleAttribute) as? String
+    return subrole == kAXStandardWindowSubrole
+      || (subrole == kAXDialogSubrole && value(window, kAXMinimizedAttribute) as? Bool == true)
   }
 
   static func isRegularView(_ window: AXUIElement, of pin: ConversationPin) -> Bool {
@@ -17,17 +35,23 @@ extension WindowAX {
 
   @MainActor static func focus(_ window: AXUIElement, pid: pid_t) async throws {
     let app = AXUIElementCreateApplication(pid)
+    let running = NSRunningApplication(processIdentifier: pid)
+    if running?.isHidden == true { running?.unhide() }
     if value(window, kAXMinimizedAttribute) as? Bool == true {
-      AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+      guard AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+        == .success else { throw WindowGroupError.unavailable("The conversation window could not be restored.") }
     }
-    NSRunningApplication(processIdentifier: pid)?.activate(options: [])
+    running?.activate(options: [])
     AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-    AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-    for _ in 0..<30 {
-      if let focused = value(app, kAXFocusedWindowAttribute), CFEqual(focused as CFTypeRef, window)
-      {
-        return
+    for tick in 0..<40 {
+      if value(window, kAXMinimizedAttribute) as? Bool == false {
+        if tick.isMultiple(of: 4) {
+          AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+          AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        }
+        if NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+          let focused = value(app, kAXFocusedWindowAttribute), CFEqual(focused as CFTypeRef, window)
+        { return }
       }
       try await Task.sleep(nanoseconds: 50_000_000)
     }
@@ -125,12 +149,13 @@ extension WindowAX {
             .trimmingCharacters(in: CharacterSet(charactersIn: ".…")))
         && value(node, kAXEnabledAttribute) as? Bool != false
     }
-    let searchButton =
-      searchMenu
-      ?? nodes(window, limit: 800).first { node in
+    let searchButton = nodes(window, limit: 800).first { node in
         value(node, kAXRoleAttribute) as? String == "AXButton"
           && ["search", "search chats", "switch chat"].contains(name(node).lowercased())
-      }
+      } ?? searchMenu
+    if let searchMenu, let searchButton, CFEqual(searchMenu, searchButton) {
+      try await focus(window, pid: pid)
+    }
     if searchButton.map({ AXUIElementPerformAction($0, kAXPressAction as CFString) }) != .success {
       // Codex can hide its Search Chats menu item and collapse the sidebar.
       // Its native Command-K shortcut opens the picker. All subsequent actions
@@ -253,5 +278,18 @@ extension WindowAX {
       ancestor = parent as! AXUIElement
     }
     return nil
+  }
+
+  static func canRetryChatSelection(in window: AXUIElement) -> Bool {
+    let elements = nodes(window, limit: 1600)
+    if elements.contains(where: { value($0, kAXRoleAttribute) as? String == kAXSheetRole }) { return false }
+    let inputs = elements.filter {
+      ["AXTextArea", "AXTextField", "AXComboBox"].contains(value($0, kAXRoleAttribute) as? String ?? "")
+        && searchDialog(for: $0) == nil
+    }
+    return !inputs.isEmpty && inputs.allSatisfy { element in
+      guard let text = value(element, kAXValueAttribute) as? String else { return false }
+      return text.isEmpty
+    }
   }
 }

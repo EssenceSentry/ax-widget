@@ -244,8 +244,8 @@ import Foundation
       return
     }
     var group = store.group
-    if let removed = group.pins.first(where: { $0.id == conversation.id }) {
-      group.remove(conversation.id)
+    if let removed = group.pins.first(where: { $0.matches(conversation) }) {
+      group.remove(removed.id)
       groupOperation = true
       Task {
         defer { groupOperation = false }
@@ -353,7 +353,7 @@ import Foundation
       return "The windows are being arranged. Try sending again in a moment."
     }
     guard !store.demo, !answering, !store.hasSent(group, in: conversation),
-      let path = conversation.source, let url = conversation.deepLink
+      let path = conversation.source, conversation.deepLink != nil
     else {
       return
         "This question has changed or is no longer awaiting an answer. Refresh or open the conversation."
@@ -377,21 +377,21 @@ import Foundation
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.activates = false
     do {
-      let running: NSRunningApplication
-      // Codex replies already address the original session over its live
-      // connection. Opening its URL here could navigate a different split pane.
-      if let active = NSRunningApplication.runningApplications(
-        withBundleIdentifier: conversation.provider.bundleIdentifier
-      ).first,
-        conversation.provider == .codex || store.group.contains(conversation)
-      {
-        running = active
+      if conversation.provider == .claude {
+        let pin = ConversationPin(conversation)
+        let pins = store.group.pins.filter { $0.provider == .claude && !$0.matches(conversation) }
+        let window = try await conversationWindows.openConversation(pin, protecting: pins)
+        try await Task.detached(priority: .userInitiated) {
+          try ClaudeQuestionClient.reply(in: window, pin: pin, group: group, answers: answers)
+        }.value
       } else {
-        running = try await NSWorkspace.shared.open(
-          [url], withApplicationAt: app, configuration: configuration)
-      }
-      let pid = running.processIdentifier
-      if conversation.provider == .codex {
+        // Codex replies address the original session over its live connection.
+        let running: NSRunningApplication
+        if let active = NSRunningApplication.runningApplications(
+          withBundleIdentifier: Provider.codex.bundleIdentifier
+        ).first { running = active }
+        else { running = try await NSWorkspace.shared.openApplication(at: app, configuration: configuration) }
+        let pid = running.processIdentifier
         do {
           try await Task.detached(priority: .userInitiated) {
             try CodexQuestionClient.reply(sessionID: conversation.sessionID, group: group, answers: answers)
@@ -404,22 +404,14 @@ import Foundation
             CodexDesktopQuestions.window(pid: pid, session: conversation.sessionID) != nil
           }.value
           if !visible {
-            let pins = store.group.pins.filter { $0.provider == .codex }
-            if pins.isEmpty {
-              _ = try await NSWorkspace.shared.open([url], withApplicationAt: app, configuration: configuration)
-            } else if !store.group.contains(conversation) {
-              try await conversationWindows.openOutsideGroup(ConversationPin(conversation), protecting: pins)
-            }
+            let pins = store.group.pins.filter { $0.provider == .codex && !$0.matches(conversation) }
+            try await conversationWindows.openConversation(ConversationPin(conversation), protecting: pins)
           }
           try await Task.detached(priority: .userInitiated) {
             try await CodexDesktopQuestions.reply(
               pid: pid, session: conversation.sessionID, source: source, group: group, answers: answers)
           }.value
         }
-      } else {
-        try await Task.detached(priority: .userInitiated) {
-          try ClaudeQuestionClient.reply(pid: pid, group: group, answers: answers)
-        }.value
       }
       store.didSend(group, in: conversation)
       return nil
@@ -433,7 +425,7 @@ import Foundation
       showConversationGroup(raiseOnly: true)
       return
     }
-    guard let url = conversation.deepLink else {
+    guard conversation.deepLink != nil else {
       let alert = NSAlert()
       alert.messageText = "Conversation unavailable in Desktop"
       alert.informativeText =
@@ -442,18 +434,18 @@ import Foundation
       return
     }
     let pins = store.group.pins.filter { $0.provider == conversation.provider }
-    guard !pins.isEmpty else { open(url, provider: conversation.provider); return }
     groupOperation = true
     floating.collapse()
     Task {
       defer { groupOperation = false }
       do {
-        try await conversationWindows.openOutsideGroup(
+        try await conversationWindows.openConversation(
           ConversationPin(conversation), protecting: pins)
         store.reportGroupError(nil)
       } catch {
         store.reportGroupError(error)
         floating.expand()
+        if !ClaudeQuestionClient.isTrusted { enableClaudeReplies() }
       }
     }
   }

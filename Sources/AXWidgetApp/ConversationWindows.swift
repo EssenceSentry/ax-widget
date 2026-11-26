@@ -18,6 +18,9 @@ import ApplicationServices
     }
   }
   private var bindings: [String: Binding] = [:]
+  // Keep the destination of an interrupted File → New Window / chat selection.
+  // Retrying one request must not allocate a succession of empty windows.
+  private var unfinishedCodex: [String: (window: AXUIElement, title: String)] = [:]
   private var busy = false
   private struct Bookmark: Codable {
     var x: Double
@@ -74,25 +77,28 @@ import ApplicationServices
     }
   }
   private func existing(_ pin: ConversationPin, pid: pid_t) -> AXUIElement? {
-    let windows = WindowAX.windows(pid)
-    if let reference = bookmarks[pin.id]?.reference, let app = runningApp(pin.provider),
-      reference.belongs(to: app)
-    {
-      guard let frame = GroupWindowInventory.read()?.entry(for: reference)?.frame else { return nil }
-      let exact = windows.filter { Bookmark(frame).matches(WindowAX.frame($0)) }
-      guard exact.count == 1 else { return nil }
-      return existing(pin, among: exact)
-    }
+    guard let windows = WindowAX.windowList(pid) else { return nil }
     return existing(pin, among: windows)
   }
 
   private func existing(_ pin: ConversationPin, among windows: [AXUIElement]) -> AXUIElement? {
-    let matching = windows.filter {
-      pin.provider == .claude ? WindowAX.isClaudePopout($0, pin: pin) : WindowAX.matches($0, pin: pin)
+    // Window numbers and frames describe containers. A user can open a different
+    // chat in the same container, or maximize two windows to identical frames.
+    lazy var codexTitle = CodexWindowIdentity.title(sessionID: pin.sessionID)
+    let matching = windows.filter { window in
+      if pin.provider == .codex {
+        return codexTitle.map { WindowAX.codexWindow(window, hasTitle: $0) } ?? false
+      }
+      return WindowAX.matches(window, pin: pin)
     }
-    if matching.count == 1 { return matching.first }
-    let recorded = matching.filter { bookmarks[pin.id]?.matches(WindowAX.frame($0)) == true }
-    return recorded.count == 1 ? recorded.first : nil
+    guard matching.count > 1 else { return matching.first }
+    if let bound = bindings[pin.id],
+      let retained = matching.first(where: { CFEqual($0, bound.window) }) { return retained }
+    if let bookmark = bookmarks[pin.id] {
+      let recorded = matching.filter { bookmark.matches(WindowAX.frame($0)) }
+      if recorded.count == 1 { return recorded.first }
+    }
+    return matching.first
   }
 
   private func bind(_ binding: Binding) {
@@ -142,6 +148,14 @@ import ApplicationServices
           // Some providers retain a stale AX object without sending its destroy event.
           lists[pid] = windows
           if !windows.contains(where: { CFEqual($0, binding.window) }) { missing.insert(pin.id) }
+        } else if !app.isHidden, !valid(binding),
+          let windows = lists[pid] ?? WindowAX.windowList(pid)
+        {
+          lists[pid] = windows
+          if let target = existing(pin, among: windows), !CFEqual(target, binding.window) {
+            bind(Binding(pin: pin, pid: pid, window: target))
+            attached = true
+          }
         }
         continue
       }
@@ -150,22 +164,17 @@ import ApplicationServices
       let sameProcess = reference?.belongs(to: app) == true
       guard let windows = lists[pid] ?? WindowAX.windowList(pid) else { continue }
       lists[pid] = windows
-      var candidates = windows
       if sameProcess, let reference {
         guard let inventory else { continue }
         // Check the recorded native number before considering any same-title copy.
-        guard let entry = inventory.entry(for: reference) else {
+        guard inventory.entry(for: reference) != nil else {
           missing.insert(pin.id)
           continue
         }
-        guard let frame = entry.frame else { continue }
-        candidates = windows.filter { Bookmark(frame).matches(WindowAX.frame($0)) }
-        guard candidates.count == 1 else { continue }
       }
-      if let window = existing(pin, among: candidates) {
-        let binding = Binding(pin: pin, pid: pid, window: window)
-        if sameProcess { binding.reference = reference }
-        bind(binding)
+      if let window = existing(pin, among: windows) {
+        // Derive the number from this window. The old number may now show a different chat.
+        bind(Binding(pin: pin, pid: pid, window: window))
         attached = true
       } else if reference == nil, let bookmark, !app.isHidden, app.isFinishedLaunching,
         let launch = GroupWindowReference.processStart(of: app), now.timeIntervalSince(launch) > 5,
@@ -196,12 +205,7 @@ import ApplicationServices
     return windows.allSatisfy { window in
       guard let name = WindowAX.value(window, kAXTitleAttribute) as? String, !name.isEmpty,
         WindowAX.value(window, kAXMinimizedAttribute) as? Bool == false else { return false }
-      if name == title {
-        // A Claude main window can display the same chat after its dedicated pop-out is closed.
-        return pin.provider == .claude && pin.desktopSessionID.map {
-          WindowAX.isClaudeMain(window, session: $0)
-        } == true
-      }
+      if name == title { return false }
       return !bookmark.matches(WindowAX.frame(window))
     }
   }
@@ -241,13 +245,13 @@ import ApplicationServices
   func verify(_ pins: [ConversationPin]) async throws -> [String: Any] {
     guard AXIsProcessTrusted() else { throw WindowGroupError.accessibility }
     let previous = NSWorkspace.shared.frontmostApplication
-    let originals = Provider.allCases.flatMap { provider -> [(AXUIElement, CGRect?, Bool)] in
-      NSRunningApplication.runningApplications(withBundleIdentifier: provider.bundleIdentifier)
-        .flatMap { app in
-          WindowAX.windows(app.processIdentifier).map {
-            ($0, WindowAX.frame($0), WindowAX.value($0, kAXMinimizedAttribute) as? Bool ?? false)
-          }
-        }
+    let previousFocus = previous.flatMap {
+      WindowAX.value(AXUIElementCreateApplication($0.processIdentifier), kAXFocusedWindowAttribute)
+    }
+    let originals = Provider.allCases.compactMap(runningApp).flatMap { app in
+      WindowAX.windows(app.processIdentifier).map {
+        ($0, WindowAX.frame($0), WindowAX.value($0, kAXMinimizedAttribute) as? Bool ?? false)
+      }
     }
     defer {
       for binding in bindings.values
@@ -257,12 +261,39 @@ import ApplicationServices
         }
       }
       for (window, frame, minimized) in originals {
-        if let frame { try? WindowAX.setFrame(window, frame) }
-        AXUIElementSetAttributeValue(
-          window, kAXMinimizedAttribute as CFString,
-          minimized ? kCFBooleanTrue : kCFBooleanFalse)
+        if let frame, WindowAX.frame(window) != frame { try? WindowAX.setFrame(window, frame) }
+        if WindowAX.value(window, kAXMinimizedAttribute) as? Bool != minimized {
+          AXUIElementSetAttributeValue(
+            window, kAXMinimizedAttribute as CFString, minimized ? kCFBooleanTrue : kCFBooleanFalse)
+        }
       }
       previous?.activate(options: [])
+      if let previousFocus { AXUIElementPerformAction(previousFocus as! AXUIElement, kAXRaiseAction as CFString) }
+    }
+    let originalTargets: [(ConversationPin, AXUIElement)] = pins.compactMap { pin in
+      guard let app = runningApp(pin.provider), let target = existing(pin, pid: app.processIdentifier)
+      else { return nil }
+      return (pin, target)
+    }
+    var staleBindingsTested = 0
+    for (pin, target) in originalTargets {
+      guard let app = runningApp(pin.provider) else { throw WindowGroupError.changed }
+      let opened = try await openConversation(pin, protecting: [])
+      guard CFEqual(opened, target) else { throw WindowGroupError.changed }
+      if let other = WindowAX.windows(app.processIdentifier).first(where: {
+        WindowAX.isStandardWindow($0) && !WindowAX.matches($0, pin: pin)
+      }), let otherFrame = WindowAX.frame(other) {
+        // A stale native window number and a stale live binding must both recover.
+        var stale = Bookmark(otherFrame)
+        stale.reference = GroupWindowInventory.read()?.reference(for: otherFrame, app: app)
+        bookmarks[pin.id] = stale
+        let wrong = Binding(pin: pin, pid: app.processIdentifier, window: other)
+        bind(wrong)
+        try await raiseExistingGroup([pin])
+        guard let rebound = bindings[pin.id], CFEqual(rebound.window, target)
+        else { throw WindowGroupError.changed }
+        staleBindingsTested += 1
+      }
     }
     for index in pins.indices {
       try await show(
@@ -272,6 +303,26 @@ import ApplicationServices
     let windows = try pins.map { pin -> Binding in
       guard let binding = bindings[pin.id], valid(binding) else { throw WindowGroupError.changed }
       return binding
+    }
+    var repeatedReuse = true
+    for (pin, original) in originalTargets {
+      let others = pins.filter { $0.provider == pin.provider && $0.id != pin.id }
+      let reopened = try await openConversation(pin, protecting: others)
+      repeatedReuse = repeatedReuse && CFEqual(reopened, original)
+        && windows.contains { $0.pin.id == pin.id && CFEqual($0.window, original) }
+    }
+    let inventoryPreserved = Provider.allCases.allSatisfy { provider in
+      guard let app = runningApp(provider), let list = WindowAX.windowList(app.processIdentifier)
+      else { return !originalTargets.contains { $0.0.provider == provider } }
+      var expected = originals.filter { item in
+        var pid: pid_t = 0
+        return AXUIElementGetPid(item.0, &pid) == .success && pid == app.processIdentifier
+      }.map(\.0)
+      for binding in windows where binding.pid == app.processIdentifier
+        && !expected.contains(where: { CFEqual($0, binding.window) }) { expected.append(binding.window) }
+      return list.count == expected.count && expected.allSatisfy { original in
+        list.contains { CFEqual($0, original) }
+      }
     }
     // Simulate a manual adjustment so a hidden re-tile cannot pass preservation.
     if let first = windows.first, var moved = WindowAX.frame(first.window) {
@@ -283,6 +334,12 @@ import ApplicationServices
     try minimize(pins)
     let minimized = try await waitForNativeTransition {
       windows.allSatisfy { WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool == true }
+    }
+    var reusedMinimized = false
+    if minimized, let first = windows.first {
+      let restored = try await openConversation(first.pin, protecting: [])
+      reusedMinimized = CFEqual(first.window, restored)
+        && WindowAX.value(restored, kAXMinimizedAttribute) as? Bool == false
     }
     try await show(pins, screen: NSScreen.main)
     NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first?
@@ -297,7 +354,7 @@ import ApplicationServices
       }
     }
     let preserved = zip(windows, frames).allSatisfy { WindowAX.frame($0.0.window) == $0.1 }
-    let restarted = ConversationWindows(persist: false)
+    let restarted = ConversationWindows(persist: false, runningApp: runningApp)
     restarted.bookmarks = bookmarks
     try await restarted.show(pins, screen: NSScreen.main)
     let reused = pins.allSatisfy { pin in
@@ -306,7 +363,7 @@ import ApplicationServices
     }
     let providerForeground = try await waitForNativeTransition {
       pins.contains {
-        $0.provider.bundleIdentifier == NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        runningApp($0.provider)?.processIdentifier == NSWorkspace.shared.frontmostApplication?.processIdentifier
       }
     }
     let stacking = WindowAX.stacking(windows.map { ($0.pid, $0.window) })
@@ -332,6 +389,9 @@ import ApplicationServices
       "minimizedTogether": minimized, "switchedAway": switchedAway,
       "restoredTogether": visible, "manualFramesPreserved": preserved,
       "providerForeground": providerForeground,
+      "alreadyOpenTargets": originalTargets.count, "reusedForOpenAndSplit": repeatedReuse,
+      "staleBindingsRecovered": staleBindingsTested, "nativeWindowInventoryPreserved": inventoryPreserved,
+      "reusedMinimizedWindow": reusedMinimized,
       "reusedAfterWidgetRestart": reused,
       "raisedTogether": stacking.raised.map { $0 as Any } ?? NSNull(),
       "normalWindowLevels": stacking.normal.map { $0 as Any } ?? NSNull(),
@@ -361,12 +421,6 @@ import ApplicationServices
     {
       if let window = existing(pin, pid: app.processIdentifier) {
         binding = Binding(pin: pin, pid: app.processIdentifier, window: window)
-      } else {
-        let matches = WindowAX.windows(app.processIdentifier).filter {
-          WindowAX.matches($0, pin: pin)
-            && (pin.provider != .claude || WindowAX.isClaudePopout($0, pin: pin))
-        }
-        if matches.count > 1 { throw WindowGroupError.ambiguous }
       }
     }
     guard let binding else { return }
@@ -447,14 +501,8 @@ import ApplicationServices
         windows.append(binding)
       } else {
         bindings.removeValue(forKey: pin.id)
-        let (binding, created, source) = try await locateOrOpen(
-          pin, alreadyGrouped: windows,
-          joining: joining?.id == pin.id)
-        if joining?.id == pin.id, let source,
-          !originalViews.contains(where: { CFEqual($0, source) })
-        {
-          originalViews.append(source)
-        }
+        let others = pins.filter { $0.id != pin.id && $0.provider == pin.provider }
+        let (binding, created) = try await locateOrOpen(pin, protecting: others)
         bind(binding)
         windows.append(binding)
         opened = opened || created
@@ -476,7 +524,8 @@ import ApplicationServices
     // Retire the exact source view only after the replacement has been verified
     // and tiled. Raising, restoring or reflowing an existing group never closes views.
     if let joining, let replacement = windows.first(where: { $0.pin.id == joining.id }) {
-      for source in originalViews where !windows.contains(where: { CFEqual(source, $0.window) }) {
+      let duplicates = originalViews.filter { source in !windows.contains { CFEqual(source, $0.window) } }
+      for source in duplicates {
         guard valid(replacement), WindowAX.isRegularView(source, of: joining) else { continue }
         do { try await WindowAX.closeRegularView(source, of: joining) } catch {
           duplicateCloseIssue = .unavailable(
@@ -484,15 +533,12 @@ import ApplicationServices
           )
         }
       }
-      if !originalViews.isEmpty { try await raiseTogether(windows) }
+      if !duplicates.isEmpty { try await raiseTogether(windows) }
     }
   }
 
   private func bound(_ pin: ConversationPin) throws -> Binding {
-    if let binding = bindings[pin.id] {
-      guard valid(binding) else { throw WindowGroupError.changed }
-      return binding
-    }
+    if let binding = bindings[pin.id], valid(binding) { return binding }
     guard let app = runningApp(pin.provider), let window = existing(pin, pid: app.processIdentifier)
     else { throw WindowGroupError.changed }
     let binding = Binding(pin: pin, pid: app.processIdentifier, window: window)
@@ -502,6 +548,9 @@ import ApplicationServices
 
   private func raiseTogether(_ windows: [Binding]) async throws {
     // Activate once so ordinary windows from another provider stay behind the split.
+    for binding in windows {
+      if let app = runningApp(binding.pin.provider), app.isHidden { app.unhide() }
+    }
     if let last = windows.last {
       NSRunningApplication(processIdentifier: last.pid)?.activate(options: [])
       AXUIElementSetAttributeValue(
@@ -512,74 +561,74 @@ import ApplicationServices
   }
 
   func raiseExistingGroup(_ pins: [ConversationPin]) async throws {
+    guard !busy else { throw WindowGroupError.changed }
     guard AXIsProcessTrusted() else { throw WindowGroupError.accessibility }
-    var windows: [Binding] = []
-    for pin in pins {
-      if let binding = bindings[pin.id], runningApp(pin.provider)?.processIdentifier == binding.pid,
-        !isClosed(binding)
-      {
-        windows.append(binding)
-      } else {
-        windows.append(try bound(pin))
-      }
-    }
+    busy = true
+    defer { busy = false }
+    let windows = try pins.map(bound)
     try await raiseTogether(windows)
+    remember()
   }
 
-  func openOutsideGroup(_ pin: ConversationPin, protecting pins: [ConversationPin]) async throws {
+  @discardableResult
+  func openConversation(_ pin: ConversationPin, protecting pins: [ConversationPin]) async throws
+    -> AXUIElement
+  {
     guard !busy else { throw WindowGroupError.changed }
     guard let url = pin.conversation.deepLink else { throw WindowGroupError.unregistered }
     busy = true
     defer { busy = false }
     guard AXIsProcessTrusted() else { throw WindowGroupError.accessibility }
-    // Launch first: a cold provider may restore saved split windows. Never
-    // send it a global Codex URL while that restoration is in progress.
     let app = try await providerApp(pin.provider)
-    let protected = pins.compactMap { try? bound($0) }
     let pid = app.processIdentifier
-    if protected.count == pins.count,
-      let target = WindowAX.windows(pid).first(where: { window in
-        !protected.contains { CFEqual($0.window, window) }
-          && WindowAX.isRegularView(window, of: pin)
-      })
+    let inventory = try await navigationWindows(for: pin, in: app)
+    if let target = existing(pin, among: inventory) {
+      try await focusConversation(target, pin: pin, pid: pid)
+      return target
+    }
+    // Uncertainty about another pane must not prevent focusing a verified target.
+    // Before navigating or creating a window, account for every protected pane.
+    let protected = try pins.map(bound)
+    let destination: AXUIElement
+    if pin.provider == .codex && !protected.isEmpty {
+      destination = try await openCodexWindow(pin, app: app).window
+    } else if pin.provider == .claude,
+      let main = protected.first(where: { !WindowAX.isClaudePopout($0.window, pin: $0.pin) })
     {
-      try await WindowAX.focus(target, pid: pid)
-      return
-    }
-    if pin.provider == .codex {
-      _ = try await openCodexWindow(pin, app: app, useChatSearch: true)
+      destination = try await openClaudePopout(pin, pid: pid, from: main.window)
     } else {
-      // Claude's OS continuation links open its main Code view. Split windows
-      // are separate native pop-outs; verify the destination by Desktop session ID.
-      _ = try await openLink(url, provider: .claude)
-      guard
-        try await waitForNativeTransition(
-          timeout: 12,
-          {
-            WindowAX.windows(pid).contains { window in
-              !protected.contains { CFEqual($0.window, window) }
-                && WindowAX.isRegularView(window, of: pin)
-            }
-          })
-      else { throw WindowGroupError.changed }
+      _ = try await openLink(url, provider: pin.provider)
+      var found: AXUIElement?
+      guard try await waitForNativeTransition(timeout: 12, {
+        found = self.existing(pin, pid: pid)
+        return found != nil
+      }), let found else { throw WindowGroupError.changed }
+      destination = found
     }
+    try await focusConversation(destination, pin: pin, pid: pid)
     guard protected.allSatisfy(valid) else { throw WindowGroupError.changed }
+    return destination
+  }
+
+  private func focusConversation(_ window: AXUIElement, pin: ConversationPin, pid: pid_t) async throws {
+    let minimized = WindowAX.value(window, kAXMinimizedAttribute) as? Bool == true
+    do {
+      try await WindowAX.focus(window, pid: pid)
+      guard try await waitForNativeTransition({
+        WindowAX.isStandardWindow(window) && WindowAX.matches(window, pin: pin)
+      }) else { throw WindowGroupError.changed }
+    } catch {
+      if minimized {
+        AXUIElementSetAttributeValue(window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
+      }
+      throw error
+    }
   }
 
   func minimize(_ pins: [ConversationPin]) throws {
     guard !busy else { return }
     guard AXIsProcessTrusted() else { throw WindowGroupError.accessibility }
-    let windows = try pins.map { pin -> Binding in
-      if bindings[pin.id] == nil,
-        let app = runningApp(pin.provider)
-      {
-        if let window = existing(pin, pid: app.processIdentifier) {
-          bind(Binding(pin: pin, pid: app.processIdentifier, window: window))
-        }
-      }
-      guard let binding = bindings[pin.id], valid(binding) else { throw WindowGroupError.changed }
-      return binding
-    }
+    let windows = try pins.map(bound)
     let states = windows.map {
       (WindowAX.value($0.window, kAXMinimizedAttribute) as? Bool) ?? false
     }
@@ -616,7 +665,7 @@ import ApplicationServices
           binding.window, kAXMinimizedAttribute as CFString, kCFBooleanFalse) == .success
       else { throw WindowGroupError.unavailable("The conversation window could not be restored.") }
     }
-    guard try await waitForNativeTransition({ valid(binding) }) else {
+    guard try await waitForNativeTransition({ WindowAX.isStandardWindow(binding.window) && valid(binding) }) else {
       if minimized {
         AXUIElementSetAttributeValue(
           binding.window, kAXMinimizedAttribute as CFString, kCFBooleanTrue)
@@ -700,78 +749,108 @@ import ApplicationServices
     return try await NSWorkspace.shared.openApplication(at: appURL, configuration: .init())
   }
 
-  private func openCodexWindow(
-    _ pin: ConversationPin, app: NSRunningApplication, useChatSearch: Bool
-  ) async throws -> Binding {
+  /// A provider can publish its AX window list before restoring its documents.
+  /// A positive session match is usable immediately. Before deciding it is absent,
+  /// require a readable, settled list and give a newly launched renderer time to restore.
+  private func navigationWindows(for pin: ConversationPin, in app: NSRunningApplication)
+    async throws -> [AXUIElement]
+  {
+    let pid = app.processIdentifier
+    let launch = GroupWindowReference.processStart(of: app)
+    let deadline = Date().addingTimeInterval(8)
+    var previous: [AXUIElement]?
+    repeat {
+      if let list = WindowAX.windowList(pid) {
+        if existing(pin, among: list) != nil { return list }
+        if app.isFinishedLaunching, launch.map({ Date().timeIntervalSince($0) > 3 }) != false,
+          let previous, previous.count == list.count,
+          list.allSatisfy({ window in previous.contains { CFEqual(window, $0) } }),
+          list.filter(WindowAX.isStandardWindow).allSatisfy({ !WindowAX.name($0).isEmpty })
+        {
+          if pin.provider == .codex, CodexWindowIdentity.title(sessionID: pin.sessionID) == nil {
+            throw WindowGroupError.ambiguous
+          }
+          if pin.provider == .claude, let session = pin.desktopSessionID {
+            let title = ClaudeWindowIdentity.title(desktopSessionID: session) ?? pin.title
+            for window in list where WindowAX.isConversationWindow(window) {
+              let name = WindowAX.name(window)
+              if (name == title || (name == "Claude" &&
+                WindowAX.value(window, kAXMinimizedAttribute) as? Bool == true)),
+                WindowAX.claudeMainURL(window) == nil {
+                throw WindowGroupError.ambiguous
+              }
+            }
+          }
+          return list
+        }
+        previous = list
+      } else {
+        previous = nil
+      }
+      try await Task.sleep(nanoseconds: 180_000_000)
+    } while Date() < deadline && !app.isTerminated
+    throw WindowGroupError.unavailable("The provider's window list is still loading. Try opening this chat again.")
+  }
+
+  private func openCodexWindow(_ pin: ConversationPin, app: NSRunningApplication) async throws -> Binding {
     guard let title = CodexWindowIdentity.title(sessionID: pin.sessionID) else {
       throw WindowGroupError.unavailable(
         "Give this Codex chat a distinct title so its window can be identified.")
     }
     let pid = app.processIdentifier
     guard let before = WindowAX.windowList(pid) else { throw WindowGroupError.changed }
-    try WindowAX.newCodexWindow(pid)
-    var destination: AXUIElement?
-    guard
-      try await waitForNativeTransition(
-        timeout: 10,
-        {
+    unfinishedCodex = unfinishedCodex.filter { _, item in
+      before.contains { CFEqual($0, item.window) } && WindowAX.name(item.window) == item.title
+    }
+    if let open = existing(pin, among: before) {
+      unfinishedCodex.removeValue(forKey: pin.id)
+      return Binding(pin: pin, pid: pid, window: open)
+    }
+    let destination: AXUIElement
+    if let prior = unfinishedCodex[pin.id] {
+      guard WindowAX.canRetryChatSelection(in: prior.window) else {
+        throw WindowGroupError.unavailable("The Codex window opened for this chat has an active input. Finish or close it before retrying.")
+      }
+      destination = prior.window
+    } else {
+      try WindowAX.newCodexWindow(pid)
+      var newWindow: AXUIElement?
+      guard try await waitForNativeTransition(timeout: 10, {
           let added = WindowAX.windows(pid).filter { window in
             WindowAX.isStandardWindow(window) && !before.contains { CFEqual($0, window) }
           }
-          destination = added.count == 1 ? added[0] : nil
-          return destination != nil
-        }), let destination
-    else { throw WindowGroupError.unavailable("Codex could not create a separate window.") }
-
-    try await WindowAX.focus(destination, pid: pid)
-    if !useChatSearch {
-      guard let url = pin.conversation.deepLink else { throw WindowGroupError.unregistered }
-      _ = try await openLink(url, provider: .codex)
-    } else {
-      // Ordinary Codex URLs navigate the last active window. Select a chat
-      // inside this specific window even if the user refocuses a split pane.
-      try await WindowAX.selectCodexChat(pin, title: title, in: destination, pid: pid)
+          newWindow = added.count == 1 ? added[0] : nil
+          return newWindow != nil
+        }), let newWindow else { throw WindowGroupError.unavailable("Codex could not create a separate window.") }
+      destination = newWindow
+      unfinishedCodex[pin.id] = (newWindow, WindowAX.name(newWindow))
     }
+    try await WindowAX.focus(destination, pid: pid)
+    // Select inside the destination even for the first split pane. A global
+    // link could otherwise follow the user's focus back to another open chat.
+    try await WindowAX.selectCodexChat(pin, title: title, in: destination, pid: pid)
     guard
       try await waitForNativeTransition(timeout: 10, { WindowAX.matches(destination, pin: pin) })
     else {
       throw WindowGroupError.unavailable(
         "Codex did not show the requested chat in the separate window.")
     }
+    unfinishedCodex.removeValue(forKey: pin.id)
     return Binding(pin: pin, pid: pid, window: destination)
   }
 
   private func locateOrOpen(
-    _ pin: ConversationPin, alreadyGrouped: [Binding], joining: Bool
-  ) async throws -> (Binding, Bool, AXUIElement?) {
-    if let running = runningApp(pin.provider) {
-      let pid = running.processIdentifier
-      if let window = existing(pin, pid: pid) {
-        return (Binding(pin: pin, pid: pid, window: window), false, nil)
-      }
-      let matches = WindowAX.windows(pid).filter { window in
-        !alreadyGrouped.contains { CFEqual($0.window, window) }
-          && (pin.provider == .claude
-            ? WindowAX.isClaudePopout(window, pin: pin) : WindowAX.matches(window, pin: pin))
-      }
-      if matches.count > 1 {
-        // Both windows really show the same registered chat. During an explicit
-        // join, adopt the foremost regular window and retire its verified duplicate.
-        guard joining, pin.provider == .codex, let first = matches.first else {
-          throw WindowGroupError.ambiguous
-        }
-        return (Binding(pin: pin, pid: pid, window: first), false, nil)
-      }
-    }
+    _ pin: ConversationPin, protecting others: [ConversationPin]
+  ) async throws -> (Binding, Bool) {
     guard let url = pin.conversation.deepLink else { throw WindowGroupError.unregistered }
+    let app = try await providerApp(pin.provider)
+    let pid = app.processIdentifier
+    let previous = try await navigationWindows(for: pin, in: app)
+    if let window = existing(pin, among: previous) {
+      return (Binding(pin: pin, pid: pid, window: window), false)
+    }
     if pin.provider == .codex {
-      let app = try await providerApp(.codex)
-      // A cold launch can restore the original chat before the new-window action.
-      if let window = existing(pin, pid: app.processIdentifier) {
-        return (Binding(pin: pin, pid: app.processIdentifier, window: window), false, nil)
-      }
-      let protecting = bindings.values.contains { $0.pin.provider == .codex && $0.pin.id != pin.id }
-      return (try await openCodexWindow(pin, app: app, useChatSearch: protecting), true, nil)
+      return (try await openCodexWindow(pin, app: app), true)
     }
     guard let session = pin.desktopSessionID,
       ClaudeWindowIdentity.title(desktopSessionID: session) != nil
@@ -779,79 +858,66 @@ import ApplicationServices
       throw WindowGroupError.unavailable(
         "Give this Claude chat a distinct title so its pop-out can be identified.")
     }
-    let previous = runningApp(.claude).map { WindowAX.windows($0.processIdentifier) } ?? []
-    let original = previous.first { WindowAX.isClaudeMain($0, session: session) }
     let otherMain = previous.first { WindowAX.claudeMainURL($0) != nil }
-    var app = runningApp(.claude)
-    var source = original
-    // A command-click on a sidebar row opens the pop-out without navigating the
-    // regular window away from its current chat.
-    if source == nil, let otherMain, let app {
+    if let otherMain {
       do {
-        try await WindowAX.openInNewWindow(pid: app.processIdentifier, window: otherMain, pin: pin)
-        let window = try await waitForPopout(pin, pid: app.processIdentifier, excluding: previous)
-        return (Binding(pin: pin, pid: app.processIdentifier, window: window), true, nil)
+        let window = try await openClaudePopout(pin, pid: pid, from: otherMain)
+        return (Binding(pin: pin, pid: pid, window: window), true)
       } catch WindowGroupError.claudeRowUnavailable {
-        // A collapsed project may not expose this row until it is selected.
+        // A collapsed project may expose its chat only after native continuation.
+      }
+    }
+    // A global Claude link can navigate any main window. Only borrow one if
+    // all other members of this provider are verified pop-outs.
+    for other in others {
+      let binding = try bound(other)
+      if !WindowAX.isClaudePopout(binding.window, pin: other) {
+        throw WindowGroupError.claudeRowUnavailable
       }
     }
     let previousSession = otherMain.flatMap { WindowAX.claudeMainURL($0) }?.lastPathComponent
     var restoreURL: URL?
-    if original == nil, let previousSession, previousSession != session {
+    if let previousSession, previousSession != session {
       var prior = pin
       prior.desktopSessionID = previousSession
       restoreURL = prior.conversation.deepLink
     }
-    if source == nil {
-      let opened = try await openLink(url, provider: .claude)
-      app = opened
-      let pid = opened.processIdentifier
-      guard
-        try await waitForNativeTransition(
-          timeout: 15,
-          {
-            source = WindowAX.windows(pid).first { WindowAX.isClaudeMain($0, session: session) }
-            return source != nil
-          })
-      else { throw WindowGroupError.ambiguous }
-    }
-    guard let app, let source else { throw WindowGroupError.changed }
-    let borrowedMain = restoreURL != nil && otherMain.map { CFEqual(source, $0) } == true
+    _ = try await openLink(url, provider: .claude)
+    var sourceWindow: AXUIElement?
+    guard try await waitForNativeTransition(timeout: 15, {
+      sourceWindow = self.existing(pin, pid: pid)
+      return sourceWindow != nil
+    }), let source = sourceWindow else { throw WindowGroupError.changed }
+    guard let restoreURL, let previousSession, let otherMain, CFEqual(source, otherMain)
+    else { return (Binding(pin: pin, pid: pid, window: source), true) }
     func restorePrevious() async {
-      if borrowedMain, let restoreURL, let previousSession,
-        WindowAX.isClaudeMain(source, session: session)
-      {
+      if WindowAX.isClaudeMain(source, session: session) {
         _ = try? await openLink(restoreURL, provider: .claude)
         _ = try? await waitForNativeTransition { WindowAX.isClaudeMain(source, session: previousSession) }
       }
     }
     do {
-      let before = WindowAX.windows(app.processIdentifier)
-      try await WindowAX.openInNewWindow(pid: app.processIdentifier, window: source, pin: pin)
-      let window = try await waitForPopout(pin, pid: app.processIdentifier, excluding: before)
+      let window = try await openClaudePopout(pin, pid: pid, from: source)
       await restorePrevious()
-      return (
-        Binding(pin: pin, pid: app.processIdentifier, window: window), true,
-        borrowedMain ? nil : source
-      )
+      return (Binding(pin: pin, pid: pid, window: window), true)
     } catch {
       await restorePrevious()
       throw error
     }
   }
 
-  private func waitForPopout(_ pin: ConversationPin, pid: pid_t, excluding old: [AXUIElement])
+  private func openClaudePopout(_ pin: ConversationPin, pid: pid_t, from source: AXUIElement)
     async throws -> AXUIElement
   {
+    guard let before = WindowAX.windowList(pid) else { throw WindowGroupError.changed }
+    if let existing = before.first(where: { WindowAX.isClaudePopout($0, pin: pin) }) { return existing }
+    try await WindowAX.openInNewWindow(pid: pid, window: source, pin: pin)
     var found: AXUIElement?
     guard
       try await waitForNativeTransition(
         timeout: 10,
         {
-          let matches = WindowAX.windows(pid).filter { window in
-            !old.contains { CFEqual($0, window) } && WindowAX.isClaudePopout(window, pin: pin)
-          }
-          found = matches.count == 1 ? matches[0] : nil
+          found = WindowAX.windows(pid).first { WindowAX.isClaudePopout($0, pin: pin) }
           return found != nil
         }), let found
     else {
@@ -878,7 +944,8 @@ enum WindowAX {
     guard
       AXUIElementCopyElementAtPosition(
         AXUIElementCreateSystemWide(), Float(x), Float(bounds.minY + 22), &hit) == .success,
-      var current = hit
+      var current = hit, let ownerWindow = value(current, kAXWindowAttribute),
+      CFEqual(ownerWindow as CFTypeRef, window)
     else { return }
     for _ in 0..<6 {
       var owner: pid_t = 0
@@ -977,17 +1044,21 @@ enum WindowAX {
       ?? value(element, kAXDescriptionAttribute) as? String ?? ""
   }
   static func matches(_ window: AXUIElement, pin: ConversationPin) -> Bool {
-    guard value(window, kAXRoleAttribute) as? String == kAXWindowRole else { return false }
     if pin.provider == .codex {
       guard let title = CodexWindowIdentity.title(sessionID: pin.sessionID) else { return false }
-      return name(window) == title
+      return codexWindow(window, hasTitle: title)
     }
-    guard let session = pin.desktopSessionID else { return false }
-    return isClaudePopout(window, pin: pin) || isClaudeMain(window, session: session)
+    guard isConversationWindow(window), let session = pin.desktopSessionID else { return false }
+    if let main = claudeMainURL(window) { return main.lastPathComponent == session }
+    return isClaudePopout(window, pin: pin)
+  }
+
+  static func codexWindow(_ window: AXUIElement, hasTitle title: String) -> Bool {
+    isConversationWindow(window) && name(window) == title
   }
 
   static func isClaudeMain(_ window: AXUIElement, session: String) -> Bool {
-    claudeMainURL(window)?.pathComponents.contains(session) == true
+    claudeMainURL(window)?.lastPathComponent == session
   }
 
   static func claudeMainURL(_ window: AXUIElement) -> URL? {
@@ -997,13 +1068,15 @@ enum WindowAX {
     while cursor < pending.count, cursor < 500, Date() < deadline {
       let (node, depth) = pending[cursor]
       cursor += 1
-      if value(node, kAXRoleAttribute) as? String == "AXWebArea",
-        let raw = value(node, "AXURL"), let url = URL(string: String(describing: raw)),
-        url.scheme == "https", url.host == "claude.ai",
-        url.pathComponents.contains("epitaxy") || url.pathComponents.contains("code")
-      {
-        // The outer native conversation document is authoritative, not links or artifact content.
-        return url
+      if value(node, kAXRoleAttribute) as? String == "AXWebArea" {
+        guard let raw = value(node, "AXURL"), let url = URL(string: String(describing: raw))
+        else { continue }
+        if url.scheme == "https", url.host == "claude.ai",
+          ["epitaxy", "code"].contains(url.pathComponents.dropFirst().first ?? "")
+        { return url }
+        // Only the desktop shell embeds the actual main document. Never search
+        // another document's transcript, links or previews for a conversation ID.
+        if !url.isFileURL || !url.path.hasSuffix("/main_window/index.html") { continue }
       }
       if depth < 24 {
         let children = value(node, kAXChildrenAttribute) as? [AXUIElement] ?? []
@@ -1031,7 +1104,7 @@ enum WindowAX {
     // Current Claude gives both the native pop-out and its blank document the
     // registered session title. Its previous renderer exposed a return button.
     if blankDocuments.count == 1, let document = blankDocuments.first,
-      name(document) == title, isStandardWindow(window), claudeMainURL(window) == nil
+      name(document) == title, isConversationWindow(window), claudeMainURL(window) == nil
     { return true }
     let returnButton = header.contains { node in
       guard value(node, kAXRoleAttribute) as? String == "AXButton",
@@ -1118,7 +1191,8 @@ enum WindowAX {
         if AXUIElementCopyElementAtPosition(
           AXUIElementCreateSystemWide(), Float(bounds.minX + 98), Float(bounds.minY + 22), &hit)
           == .success,
-          var current = hit
+          var current = hit, let ownerWindow = value(current, kAXWindowAttribute),
+          CFEqual(ownerWindow as CFTypeRef, window)
         {
           for _ in 0..<6 {
             var owner: pid_t = 0
@@ -1188,21 +1262,22 @@ enum WindowAX {
     else { throw WindowGroupError.claudeRowUnavailable }
     AXUIElementPerformAction(window, kAXRaiseAction as CFString)
     AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
-      throw WindowGroupError.unavailable(
-        "Bring Claude to the front before opening its conversation window.")
-    }
-    lastNavigation.append("postEventsAllowed=\(CGPreflightPostEventAccess())")
     let point = CGPoint(x: rect.midX, y: rect.midY)
-    CGEvent(
-      mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point,
-      mouseButton: .left)?.post(tap: .cghidEventTap)
-    try await Task.sleep(nanoseconds: 100_000_000)
-    for kind in [CGEventType.leftMouseDown, .leftMouseUp] {
-      let click = CGEvent(
-        mouseEventSource: nil, mouseType: kind, mouseCursorPosition: point, mouseButton: .left)
-      click?.flags = .maskCommand
-      click?.post(tap: .cghidEventTap)
+    var hit: AXUIElement?
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid,
+      let focused = value(app, kAXFocusedWindowAttribute), CFEqual(focused as CFTypeRef, window),
+      CGPreflightPostEventAccess(),
+      AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit) == .success,
+      let hit, belongs(hit, to: row),
+      let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
+      let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
+    else {
+      throw WindowGroupError.unavailable("Claude's conversation row moved or is covered. Bring its window forward and try again.")
+    }
+    for click in [down, up] {
+      click.flags = .maskCommand
+      click.setIntegerValueField(.mouseEventClickState, value: 1)
+      click.post(tap: .cghidEventTap)
     }
     try await Task.sleep(nanoseconds: 350_000_000)
   }
