@@ -951,7 +951,7 @@ enum WindowAX {
       var owner: pid_t = 0
       guard AXUIElementGetPid(current, &owner) == .success, owner == pid else { return }
       if value(current, kAXRoleAttribute) as? String == "AXButton" {
-        let label = name(current).lowercased()
+        let label = sidebarAction(name(current))
         if label == "hide sidebar" {
           AXUIElementPerformAction(current, kAXPressAction as CFString)
           try? await Task.sleep(nanoseconds: 150_000_000)
@@ -987,14 +987,33 @@ enum WindowAX {
     }
     guard indices.count == windows.count else { return (nil, nil) }
     let group = Set(indices)
+    let controls = windows.map { pid, window in
+      let controls = [value(window, kAXCloseButtonAttribute), value(window, kAXMinimizeButtonAttribute),
+        value(window, kAXZoomButtonAttribute) ?? value(window, "AXFullScreenButton")]
+      return (pid, controls.compactMap { $0.flatMap { frame($0 as! AXUIElement) } })
+    }
     let raised = indices.allSatisfy { index in
       !rows.prefix(index).enumerated().contains { other, row in
         guard row.2 == 0, !group.contains(other) else { return false }
+        // Electron can give the three title-bar buttons their own layer-zero
+        // WindowServer surface. That surface belongs to the raised group.
+        if controls.contains(where: { $0.0 == row.0 && coversTitleBarButtons(row.1, buttons: $0.1) }) {
+          return false
+        }
         let overlap = row.1.intersection(rows[index].1)
         return !overlap.isNull && overlap.width * overlap.height > 100
       }
     }
     return (raised, indices.allSatisfy { rows[$0].2 == 0 })
+  }
+
+  static func coversTitleBarButtons(_ surface: CGRect, buttons: [CGRect]) -> Bool {
+    guard buttons.count == 3, buttons.allSatisfy({ !$0.isEmpty && $0.width <= 24 && $0.height <= 24 }),
+      let first = buttons.first else { return false }
+    let cluster = buttons.dropFirst().reduce(first) { $0.union($1) }
+    guard cluster.width >= 32 && cluster.width < 90 && cluster.height <= 26 else { return false }
+    return cluster.insetBy(dx: -8, dy: -6).contains(surface)
+      && buttons.allSatisfy { surface.contains(CGPoint(x: $0.midX, y: $0.midY)) }
   }
   static func value(_ element: AXUIElement, _ name: String) -> Any? {
     var result: CFTypeRef?
@@ -1201,9 +1220,8 @@ enum WindowAX {
               "toolbarHit=\(value(current, kAXRoleAttribute) as? String ?? ""):\(name(current)) owner=\(owner)"
             )
             guard owner == pid else { break }
-            let label = name(current).lowercased()
             if value(current, kAXRoleAttribute) as? String == "AXButton",
-              ["show sidebar", "hide sidebar"].contains(label)
+              let label = sidebarAction(name(current))
             {
               return labels.contains(label)
                 && AXUIElementPerformAction(current, kAXPressAction as CFString) == .success
@@ -1217,7 +1235,12 @@ enum WindowAX {
         guard let bounds, let rect = frame(node) else { return false }
         return rect.minY < bounds.minY + 65 && rect.height <= 40 && rect.minX < bounds.minX + 200
       }
-      return press(controls, names: labels, roles: ["AXButton"])
+      let buttons = controls.filter {
+        value($0, kAXRoleAttribute) as? String == "AXButton"
+          && sidebarAction(name($0)).map(labels.contains) == true
+      }
+      guard buttons.count == 1 else { return false }
+      return AXUIElementPerformAction(buttons[0], kAXPressAction as CFString) == .success
     }
     let shownSidebar = header(["show sidebar"])
     let cursor = CGEvent(source: nil)?.location

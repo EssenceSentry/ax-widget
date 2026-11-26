@@ -4,6 +4,13 @@ import ApplicationServices
 import Carbon.HIToolbox
 
 extension WindowAX {
+  static func sidebarAction(_ label: String) -> String? {
+    // Claude appends its name and live status to the title-bar button's AX label.
+    let action = label.split(separator: ",", maxSplits: 1).first?
+      .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return action == "show sidebar" || action == "hide sidebar" ? action : nil
+  }
+
   static func belongs(_ hit: AXUIElement, to control: AXUIElement) -> Bool {
     var element = hit
     for _ in 0..<12 {

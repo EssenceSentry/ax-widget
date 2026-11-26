@@ -3,6 +3,20 @@ import Testing
 
 @testable import AXWidgetApp
 
+@Test func sidebarButtonsAcceptClaudeStatusSuffixesOnlyAfterTheAction() {
+  #expect(WindowAX.sidebarAction("Show sidebar, Claude, awaiting your input") == "show sidebar")
+  #expect(WindowAX.sidebarAction("Hide sidebar") == "hide sidebar")
+  #expect(WindowAX.sidebarAction("Show sidebar settings, Claude") == nil)
+  #expect(WindowAX.sidebarAction("A conversation about Show sidebar") == nil)
+}
+
+@Test func onlyTheNativeTitleBarControlSurfaceCountsAsPartOfTheGroup() {
+  let buttons = [26, 46, 66].map { CGRect(x: $0, y: 56, width: 14, height: 14) }
+  #expect(WindowAX.coversTitleBarButtons(CGRect(x: 23, y: 54, width: 65, height: 20), buttons: buttons))
+  #expect(!WindowAX.coversTitleBarButtons(CGRect(x: 20, y: 50, width: 180, height: 100), buttons: buttons))
+  #expect(!WindowAX.coversTitleBarButtons(buttons[0], buttons: buttons))
+}
+
 @Test func windowNumbersAreBoundOnlyToUnambiguousProviderWindows() {
   let frame = CGRect(x: 20, y: 35, width: 600, height: 800)
   let original = GroupWindowInventory.Entry(pid: 12, number: 41, frame: frame, level: 0)

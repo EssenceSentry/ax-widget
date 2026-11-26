@@ -22,10 +22,13 @@ enum CodexDesktopQuestions {
 
   static func window(pid: pid_t, session: String) -> AXUIElement? {
     guard let title = CodexWindowIdentity.title(sessionID: session) else { return nil }
-    let windows = WindowAX.windows(pid).filter {
-      WindowAX.name($0) == title && WindowAX.isStandardWindow($0)
-    }
-    return windows.count == 1 ? windows[0] : nil
+    let windows = WindowAX.windows(pid).filter { WindowAX.codexWindow($0, hasTitle: title) }
+    guard windows.count > 1 else { return windows.first }
+    // The title already identifies one registered session. If it has two native
+    // views, send only through the one that actually has the provider's focus.
+    guard let focused = WindowAX.value(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute)
+    else { return nil }
+    return windows.first { CFEqual($0, focused as CFTypeRef) }
   }
 
   struct Form {
